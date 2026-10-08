@@ -1,7 +1,8 @@
 .PHONY: setup smoke api web agent
 
 setup:
-	conda env create -f environment.yml || conda env update -f environment.yml
+	uv venv --python 3.11 .venv
+	uv pip install -r requirements.txt
 	cd web && npm install
 
 smoke:

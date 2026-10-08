@@ -1,4 +1,4 @@
-"""FloodLens Strands agent module."""
+"""FloodLens Strands agent module supporting Gemini, Anthropic, and Ollama."""
 
 import os
 import sys
@@ -11,14 +11,15 @@ load_dotenv()
 
 def get_model() -> Any:
     """Instantiate and return the configured model provider."""
-    provider = os.getenv("MODEL_PROVIDER", "ollama").lower()
+    provider = os.getenv("MODEL_PROVIDER", "gemini").lower()
 
-    if provider == "ollama":
-        from strands.models.ollama import OllamaModel
+    if provider == "gemini":
+        from strands.models.gemini import GeminiModel
 
-        model_id = os.getenv("OLLAMA_MODEL", "llama3.1")
-        host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        return OllamaModel(host=host, model_id=model_id)
+        model_id = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        client_args = {"api_key": api_key} if api_key else None
+        return GeminiModel(model_id=model_id, client_args=client_args)
 
     elif provider == "anthropic":
         from strands.models.anthropic import AnthropicModel
@@ -27,8 +28,18 @@ def get_model() -> Any:
         api_key = os.getenv("ANTHROPIC_API_KEY")
         return AnthropicModel(model_id=model_id, api_key=api_key)
 
+    elif provider == "ollama":
+        from strands.models.ollama import OllamaModel
+
+        model_id = os.getenv("OLLAMA_MODEL", "llama3.1")
+        host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        return OllamaModel(host=host, model_id=model_id)
+
     else:
-        raise ValueError(f"Unsupported MODEL_PROVIDER: {provider}")
+        raise ValueError(
+            f"Unsupported MODEL_PROVIDER '{provider}'. "
+            "Supported providers: gemini, anthropic, ollama."
+        )
 
 
 def create_agent() -> Any:
@@ -43,7 +54,7 @@ def create_agent() -> Any:
         system_prompt=(
             "You are the FloodLens municipal flood control room assistant. "
             "You help operators assess urban waterlogging risk and coordinate "
-            "drainage pump deployments."
+            "drainage pump deployments in the Delhi-Gurgaon region."
         ),
     )
 
@@ -57,11 +68,9 @@ def run_agent(prompt: str) -> str:
 
 if __name__ == "__main__":
     user_prompt = sys.argv[1] if len(sys.argv) > 1 else "hello"
-    print(f"Running FloodLens agent with prompt: {user_prompt}")
-    print(f"Provider: {os.getenv('MODEL_PROVIDER', 'ollama')}")
-    try:
-        output = run_agent(user_prompt)
-        print("Response:")
-        print(output)
-    except Exception as exc:
-        print(f"Agent execution encountered an error: {exc}")
+    active_provider = os.getenv("MODEL_PROVIDER", "gemini").lower()
+    print(f"Running FloodLens agent with provider: {active_provider}")
+    print(f"Prompt: {user_prompt}")
+    output = run_agent(user_prompt)
+    print("Response:")
+    print(output)

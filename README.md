@@ -11,11 +11,16 @@ Urban waterlogging early-warning tool for Delhi-Gurgaon. Given a rainfall scenar
 ## Quick start
 
 ```bash
-# 1. Create conda environment
-conda env create -f environment.yml
-conda activate floodlens
+# 1. Create virtual environment with Python 3.11 using uv
+uv venv --python 3.11 .venv
 
-# 2. Copy env file
+# On Windows PowerShell:
+.venv\Scripts\activate
+
+# 2. Install dependencies
+uv pip install -r requirements.txt
+
+# 3. Copy env file
 cp .env.example .env
 
 # 3. Run smoke test

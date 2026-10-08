@@ -1,9 +1,16 @@
-# Matching environment.yml pip section
-# Install geospatial deps via conda first (see environment.yml)
-strands-agents
-strands-agents-tools
+numpy
+shapely
+pyproj
+rasterio
+geopandas
+h3
 pysheds
+matplotlib
 fastapi
 uvicorn
 requests
 python-dotenv
+strands-agents
+strands-agents-tools
+google-genai
+boto3
