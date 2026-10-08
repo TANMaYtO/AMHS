@@ -36,6 +36,7 @@ cd web && npm install && npm run dev
 ## Honest limits
 
 - **30 m DEM resolution**: Cannot resolve underpasses, narrow culverts, or storm drains. We inject known underpasses from OpenStreetMap as "sink priors", but coverage is incomplete.
+- **DSM surface model artifacts**: Copernicus GLO-30 is a Digital Surface Model (DSM) that reflects treetops and building roofs rather than bare earth. Dense urban street canyons can appear as artificial pits between tall structures, while railway decks and flyovers hide sunken underpasses beneath them. We mitigate this with light Gaussian smoothing (`sigma=0.5`), filtering depressions shallower than `0.25 m` (`MIN_DEPRESSION_DEPTH_M`), and overlaying OSM underpasses as sink priors.
 - **Ground-truth quality**: Evaluation spots come from news reports of waterlogging, which provide neighborhood-level locations (not GPS coordinates). We use a ~300 m matching radius, which is generous.
 - **No real-time drainage data**: The model has no information about pump station capacity, drain blockages, or ongoing construction. It is a terrain-based susceptibility estimate, not a hydraulic simulation.
 - **Single-city scope**: Trained and tested only on Delhi-Gurgaon-Noida. Transferability to other cities is untested.

@@ -19,17 +19,35 @@ WORLDCOVER_DIR: Path = DATA_DIR / "worldcover"
 OSM_DIR: Path = DATA_DIR / "osm"
 RAINFALL_DIR: Path = DATA_DIR / "rainfall"
 CACHE_DIR: Path = DATA_DIR / "cache"
+DERIVED_DIR: Path = DATA_DIR / "derived"
+
+DEM_FILE: Path = DATA_DIR / "dem.tif"
+BUILTUP_FILE: Path = DATA_DIR / "builtup.tif"
+UNDERPASSES_FILE: Path = DATA_DIR / "underpasses.geojson"
 
 # Ensure data dirs exist
-for _d in (DATA_DIR, DEM_DIR, WORLDCOVER_DIR, OSM_DIR, RAINFALL_DIR, CACHE_DIR):
+for _d in (
+    DATA_DIR,
+    DEM_DIR,
+    WORLDCOVER_DIR,
+    OSM_DIR,
+    RAINFALL_DIR,
+    CACHE_DIR,
+    DERIVED_DIR,
+):
     _d.mkdir(parents=True, exist_ok=True)
 
-# ── DEM ──────────────────────────────────────────────────────────────
+# ── DEM & WorldCover S3 sources ──────────────────────────────────────
 DEM_BUCKET: str = "copernicus-dem-30m"
 DEM_RESOLUTION_M: int = 30
-
-# ── WorldCover ───────────────────────────────────────────────────────
 WORLDCOVER_BUCKET: str = "esa-worldcover"
+
+# ── Terrain & DSM Artifact Filtering ────────────────────────────────
+# Copernicus GLO-30 is a Digital Surface Model (DSM) including canopy &
+# structures. To mitigate artificial pits created by dense building clusters:
+MIN_DEPRESSION_DEPTH_M: float = 0.25  # ignore depressions shallower than 25 cm
+DEM_SMOOTHING_SIGMA: float = 0.5  # light Gaussian blur to soften roof edges
+HAND_ACCUMULATION_THRESHOLD: int = 500  # cells required to initiate drainage
 
 # ── Open-Meteo ───────────────────────────────────────────────────────
 OPEN_METEO_FORECAST_URL: str = "https://api.open-meteo.com/v1/forecast"
