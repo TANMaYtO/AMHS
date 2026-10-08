@@ -1,0 +1,9 @@
+# Matching environment.yml pip section
+# Install geospatial deps via conda first (see environment.yml)
+strands-agents
+strands-agents-tools
+pysheds
+fastapi
+uvicorn
+requests
+python-dotenv

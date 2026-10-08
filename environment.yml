@@ -1,0 +1,22 @@
+name: floodlens
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - rasterio
+  - geopandas
+  - shapely
+  - pyproj
+  - h3-py
+  - duckdb
+  - numpy
+  - pip
+  - pip:
+      - strands-agents
+      - strands-agents-tools
+      - pysheds
+      - fastapi
+      - uvicorn
+      - requests
+      - python-dotenv
