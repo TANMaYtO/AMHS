@@ -108,18 +108,32 @@ def compute_terrain_indices(
     print("Computing flow accumulation...")
     acc = grid.accumulation(fdir)
 
-    print("Computing cell slopes...")
-    raw_slope = grid.cell_slopes(dem, fdir)
-    # Clean slope values (finite and non-negative)
-    slope = np.nan_to_num(raw_slope, nan=0.001)
-    slope = np.maximum(slope, 0.001)
+    print("Computing terrain slope gradient...")
+    # Cell spacing in meters at latitude ~28.6°:
+    # dy ~ 0.00027778° * 111,139 m/deg ~ 30.87 m
+    # dx ~ 0.00027778° * 111,139 * cos(28.6°) ~ 27.10 m
+    dx_m = 27.10
+    dy_m = 30.87
+    gy, gx = np.gradient(dem, dy_m, dx_m)
+    slope = np.sqrt(gx**2 + gy**2).astype(np.float32)
+    # Safe minimum gradient of 0.1% (0.001) for flat plains
+    safe_slope = np.maximum(slope, 0.001)
 
     print("Computing Topographic Wetness Index (TWI)...")
     # Specific catchment area a = (acc + 1) * cell_size (~30 m)
     cell_size_m = 30.0
     a = (acc + 1.0) * cell_size_m
-    twi = np.log(a / np.tan(np.maximum(slope, 0.001)))
+    twi = np.log(a / safe_slope).astype(np.float32)
     twi = np.nan_to_num(twi, nan=0.0, posinf=25.0, neginf=0.0)
+
+    twi_zeros = int(np.sum(twi == 0.0))
+    twi_nans = int(np.sum(np.isnan(twi)))
+    total_cells = int(twi.size)
+    print(
+        f"TWI Stats: min={twi.min():.2f}, mean={twi.mean():.2f}, "
+        f"max={twi.max():.2f} | Zero cells: {twi_zeros}/{total_cells} "
+        f"({twi_zeros/total_cells*100:.3f}%), NaN cells: {twi_nans}"
+    )
 
     print(f"Computing HAND (drainage threshold = {HAND_ACCUMULATION_THRESHOLD})...")
     stream_mask = acc >= HAND_ACCUMULATION_THRESHOLD

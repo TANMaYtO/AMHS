@@ -14,3 +14,4 @@ strands-agents
 strands-agents-tools
 google-genai
 boto3
+pyarrow
