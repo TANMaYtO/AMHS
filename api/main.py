@@ -1,15 +1,18 @@
 """FloodLens FastAPI application.
 
-Provides early-warning waterlogging hotspots and model metadata endpoints:
+Provides early-warning waterlogging hotspots, model metadata, and agent endpoints:
 - GET /health: Service health check
 - GET /hotspots: Ranked flooded H3 hexes for a given rainfall scenario
 - GET /meta: Model parameters, weights, bounding box, and uncalibrated disclaimer
+- POST /agent/chat: Conversational control room agent with tool execution tracing
 """
 
 from typing import Any
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
+from agent.agent import chat_with_agent_async
 from engine.config import (
     BBOX_EAST,
     BBOX_NORTH,
@@ -30,7 +33,8 @@ app = FastAPI(
     version="0.1.0",
     description=(
         "Urban waterlogging early-warning service for Delhi-Gurgaon. "
-        "Ranks street-level H3 hex spots by flood severity given rainfall scenarios."
+        "Ranks corridor-level (~1 km) H3 hex spots by flood severity "
+        "given rainfall scenarios."
     ),
 )
 
@@ -42,6 +46,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class ChatRequest(BaseModel):
+    """Chat request payload containing message and optional conversation history."""
+
+    message: str
+    history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ToolTraceItem(BaseModel):
+    """Structured representation of an executed tool call."""
+
+    tool: str
+    args: dict[str, Any]
+    summary: str
+
+
+class ChatResponse(BaseModel):
+    """Chat response payload containing agent reply and tool execution trace."""
+
+    reply: str
+    tool_trace: list[ToolTraceItem]
 
 
 @app.on_event("startup")
@@ -100,3 +126,21 @@ async def hotspots_endpoint(
 ) -> dict[str, Any]:
     """Return GeoJSON FeatureCollection of top flooded hexes ranked by severity."""
     return get_hotspots(mm_per_hr=mm, top_k=top)
+
+
+@app.post("/agent/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest) -> ChatResponse:
+    """Execute conversational query with the FloodLens control room agent."""
+    reply_text, traces = await chat_with_agent_async(
+        message=request.message,
+        history=request.history,
+    )
+    trace_items = [
+        ToolTraceItem(
+            tool=t["tool"],
+            args=t["args"],
+            summary=t["summary"],
+        )
+        for t in traces
+    ]
+    return ChatResponse(reply=reply_text, tool_trace=trace_items)
