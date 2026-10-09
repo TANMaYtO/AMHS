@@ -1,3 +1,33 @@
-location_name,lat,lon,source,date
-"Minto Bridge underpass",28.6280,77.2190,news,2023-07-09
-"ITO",28.6270,77.2410,news,2023-07-09
+id,event_date,name,lat,lon,geom_type,source_url,geocode_method,confidence,split
+SPOT_001,2026-08-06,ITO,28.62819,77.24104,point,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,medium,dev
+SPOT_002,2026-08-06,Mathura Road,28.59747,77.24068,stretch,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,medium,dev
+SPOT_003,2026-08-06,CR Park,28.54151,77.2433,area,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,medium,dev
+SPOT_004,2026-08-06,Vijay Chowk,28.61571,77.20907,point,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,medium,dev
+SPOT_005,2026-08-06,Kartavya Path,28.61324,77.22307,stretch,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,medium,dev
+SPOT_006,2026-08-06,Lodhi Road,28.58976,77.21633,stretch,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,high,dev
+SPOT_007,2026-08-06,Sangam Vihar,28.50571,77.24847,area,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,medium,dev
+SPOT_008,2026-08-06,NH-48 towards Gurugram,28.49466,77.08703,stretch,https://www.businesstoday.in/india/story/delhi-ncr-rains-key-roads-waterlogged-after-heavy-downpour-gurugram-comes-to-a-standstill-547671-2026-08-06,nominatim,medium,dev
+SPOT_009,2026-07-08,Rajiv Chowk Gurugram,28.44747,77.03284,point,https://www.thequint.com/news/breaking-news/heavy-rainfall-waterlogging-gurugram-alerts-delhi-ghaziabad,nominatim,medium,dev
+SPOT_010,2026-07-08,Hero Honda Chowk Gurugram,28.43599,77.01019,point,https://www.thequint.com/news/breaking-news/heavy-rainfall-waterlogging-gurugram-alerts-delhi-ghaziabad,nominatim,medium,dev
+SPOT_011,2026-07-08,Patel Nagar Gurugram,28.46577,77.0392,area,https://www.thequint.com/news/breaking-news/heavy-rainfall-waterlogging-gurugram-alerts-delhi-ghaziabad,nominatim,medium,dev
+SPOT_012,2026-07-08,Civil Lines Gurugram,28.46169,77.0339,area,https://www.thequint.com/news/breaking-news/heavy-rainfall-waterlogging-gurugram-alerts-delhi-ghaziabad,nominatim,medium,dev
+SPOT_013,2023-07-09,Minto Bridge,28.63656,77.22231,point,https://www.hindustantimes.com/cities/waterlogged-since-1950s-why-minto-bridge-is-delhi-s-flooding-constant/story-EMM9oz0CvshDaiZ8qIQ9TJ.html,nominatim,medium,dev
+SPOT_014,2026-08-25,Subhash Chowk Gurugram,28.42772,77.03711,point,https://indianexpress.com/article/cities/delhi/at-least-12-school-buses-go-under-in-gurgaon-children-stranded-for-hours-10848084/,nominatim,medium,dev
+
+SPOT_015,2026-07-28,Connaught Place,28.63177,77.21938,area,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,high,test
+SPOT_016,2026-07-28,Janpath,28.62321,77.21915,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_017,2026-07-28,Bharat Mandapam Road,28.61737,77.2446,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_018,2026-07-28,Barakhamba Road,28.62747,77.22904,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_019,2026-07-28,Kalindi Kunj,28.54292,77.31011,area,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_020,2026-07-28,Greater Kailash-II to Chirag Dilli,28.53812,77.22816,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_021,2026-07-28,Hauz Khas,28.5476,77.20134,area,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_022,2026-07-28,R.K. Puram,28.56145,77.17552,area,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_023,2026-07-28,NH-8 near Shankar Vihar,28.55744,77.13967,point,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_024,2026-07-28,Zakir Hussain Road,28.60483,77.23563,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_025,2026-07-28,Delhi Cantt-Naraina Flyover stretch,28.62194,77.13509,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_026,2026-07-28,Old Rohtak Road,28.66971,77.16736,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_027,2026-07-28,Madhuban Chowk-Netaji Subhash Place,28.70327,77.13225,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_028,2026-07-28,Peeragarhi,28.67731,77.0931,point,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_029,2026-07-28,NH-48 near AIIMS,28.56686,77.20781,point,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_030,2026-07-28,Delhi-Noida Road,28.61725,77.28057,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test
+SPOT_031,2026-07-28,Vikas Marg,28.62945,77.27576,stretch,https://www.nationalheraldindia.com/national/heavy-rain-floods-parts-of-delhi-snarls-traffic-as-imd-issues-red-alert,nominatim,medium,test

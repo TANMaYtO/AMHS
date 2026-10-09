@@ -35,12 +35,14 @@ cd web && npm install && npm run dev
 
 ## Honest limits
 
-- **30 m DEM resolution**: Cannot resolve underpasses, narrow culverts, or storm drains. We inject known underpasses from OpenStreetMap as "sink priors", but coverage is incomplete.
-- **DSM surface model artifacts**: Copernicus GLO-30 is a Digital Surface Model (DSM) that reflects treetops and building roofs rather than bare earth. Dense urban street canyons can appear as artificial pits between tall structures, while railway decks and flyovers hide sunken underpasses beneath them. We mitigate this with light Gaussian smoothing (`sigma=0.5`), filtering depressions shallower than `0.25 m` (`MIN_DEPRESSION_DEPTH_M`), and overlaying OSM underpasses as sink priors.
-- **Ground-truth quality**: Evaluation spots come from news reports of waterlogging, which provide neighborhood-level locations (not GPS coordinates). We use a ~300 m matching radius, which is generous.
-- **No real-time drainage data**: The model has no information about pump station capacity, drain blockages, or ongoing construction. It is a terrain-based susceptibility estimate, not a hydraulic simulation.
+- **Test split is Delhi-only**: All Gurugram waterlogged spots appear exclusively in the DEV split (2026-07-08, 2026-08-06, 2026-08-25). The TEST split (2026-07-28 red-alert) is strictly Delhi-only. Consequently, **no Gurugram validation or cross-city generalization is claimed**.
+- **Coarse ground-truth precision**: Ground-truth spots are extracted from journalistic reports rather than GPS survey telemetry. Locations represent landmark and intersection centroids (for points) or road midpoints (for stretches and areas), requiring spatial match tolerances (300 m / 500 m for points; 1,000 m for stretches).
+- **ERA5 convective rain smoothing**: Open-Meteo historical precipitation relies on ERA5 / global reanalysis models that smooth intense localized convective thunderstorm cells across ~25–30 km grid boxes. Hourly and daily precipitation values underestimate localized cloudburst gauge totals; therefore, **no real-time dynamic storm event replay is claimed**.
+- **Small sample size ($N$)**: With 14 DEV spots and 17 TEST spots, the sample size is limited, and 95% bootstrap confidence intervals are unavoidably wide.
 - **Uncalibrated Relative Scoring**: The composite susceptibility score ($S \in [0, 1]$) and rainfall trigger thresholds ($R_i = R_{\text{REF}} \cdot e^{-K \cdot S_i}$) represent a *relative* prioritization index, not a physically calibrated hydrodynamic simulation. The absolute mm/hr thresholds are heuristic assumptions designed for scenario ranking and emergency prioritization, not absolute inundation depth predictions.
-- **Single-city scope**: Trained and tested only on Delhi-Gurgaon-Noida. Transferability to other cities is untested.
+- **30 m DEM resolution & DSM surface model artifacts**: Copernicus GLO-30 is a surface model (DSM) capturing tree canopies and building rooftops rather than bare earth. Elevated flyovers and railway decks mask underground depressions beneath them (such as Minto Bridge and Hero Honda underpasses). We mitigate this with light Gaussian smoothing (`sigma=0.5`), filtering depressions shallower than `0.25 m` (`MIN_DEPRESSION_DEPTH_M`), and overlaying OpenStreetMap sink priors.
+- **No real-time drainage telemetry**: The model does not ingest live pump station operations, drain siltation/blockage telemetry, or ongoing construction disruptions. It models passive terrain susceptibility.
+
 
 ## License
 
