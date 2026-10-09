@@ -10,27 +10,60 @@ Urban waterlogging early-warning tool for Delhi-Gurgaon. Given a rainfall scenar
 
 ## Quick start
 
-```bash
+### On Windows (PowerShell)
+
+```powershell
 # 1. Create virtual environment with Python 3.11 using uv
 uv venv --python 3.11 .venv
 
-# On Windows PowerShell:
-.venv\Scripts\activate
+# 2. Activate virtual environment
+.\.venv\Scripts\Activate.ps1
 
-# 2. Install dependencies
+# 3. Install dependencies
 uv pip install -r requirements.txt
 
-# 3. Copy env file
-cp .env.example .env
+# 4. Copy configuration
+Copy-Item .env.example .env
 
-# 3. Run smoke test
-python scripts/smoke_test.py
+# 5. Run smoke test
+.\.venv\Scripts\python scripts/smoke_test.py
 
-# 4. Start API
-uvicorn api.main:app --reload --port 8000
+# 6. Start FastAPI backend (Terminal 1)
+.\.venv\Scripts\python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 
-# 5. Start frontend (separate terminal)
+# 7. Start Vite control room frontend (Terminal 2)
+cd web
+npm install
+npm run dev
+```
+
+### On Windows (Command Prompt `cmd.exe`)
+
+```cmd
+:: 1. Activate venv
+.venv\Scripts\activate.bat
+
+:: 2. Start FastAPI backend
+python -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+
+:: 3. Start Frontend (in web\)
 cd web && npm install && npm run dev
+```
+
+### Using Makefile (Linux / macOS / Git Bash)
+
+```bash
+# Setup environment & install packages
+make setup
+
+# Run smoke test verification
+make smoke
+
+# Start API server on port 8000
+make api
+
+# Start Vite frontend on port 5173
+make web
 ```
 
 ## Honest limits

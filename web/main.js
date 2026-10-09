@@ -13,13 +13,21 @@ marked.setOptions({
 // ============================================================================
 const state = {
   rainfallMm: 40.0,
-  topK: 25,
+  topK: 100,
   city: 'all',
   activeSplit: 'test',
   evaluationData: null,
   sliderDebounceTimer: null,
   history: [],
 };
+
+// Safe elevation formatter to clamp negative zero
+function formatElevation(elev) {
+  if (elev === null || elev === undefined) return '0.0 m';
+  const val = Number(elev);
+  if (Math.abs(val) < 0.05) return '0.0 m';
+  return `${val.toFixed(1)} m`;
+}
 
 // ============================================================================
 // MapLibre Initialization
@@ -87,12 +95,48 @@ function createGeoJSONCircle(center, radiusInMeters, points = 48) {
 map.on('load', async () => {
   console.log('[Map] MapLibre initialized.');
 
-  // 1. Flooded Hexes Source & Layers
+  // 1. Flooded Hexes Sources (Polygons & Points for Regional Zoom)
   map.addSource('flooded-hexes', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
   });
 
+  map.addSource('flooded-hexes-points', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  // Circle layer for city-wide zoom (visible at all zooms, prominent at low zoom)
+  map.addLayer({
+    id: 'flooded-hexes-points-layer',
+    type: 'circle',
+    source: 'flooded-hexes-points',
+    paint: {
+      'circle-radius': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8, 3.5,
+        10, 5.5,
+        12, 7.5,
+        14, 10.0,
+      ],
+      'circle-color': [
+        'interpolate',
+        ['linear'],
+        ['get', 'severity'],
+        1.0, '#38bdf8',  // Cyan (at trigger threshold)
+        1.5, '#f59e0b',  // Amber (moderate severity)
+        3.0, '#ef4444',  // Red (high severity)
+        6.0, '#b91c1c',  // Dark Red (extreme)
+      ],
+      'circle-stroke-width': 1.0,
+      'circle-stroke-color': '#ffffff',
+      'circle-opacity': 0.85,
+    },
+  });
+
+  // Hex polygon fill layer
   map.addLayer({
     id: 'flooded-hexes-fill',
     type: 'fill',
@@ -122,7 +166,7 @@ map.on('load', async () => {
     },
   });
 
-  // 2. OSM Underpasses Source & Layer
+  // 2. OSM Underpasses Source & Layer (Default OFF)
   map.addSource('underpasses', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
@@ -132,6 +176,9 @@ map.on('load', async () => {
     id: 'underpasses-layer',
     type: 'circle',
     source: 'underpasses',
+    layout: {
+      visibility: 'none', // Default OFF per operator specification
+    },
     paint: {
       'circle-radius': 4.5,
       'circle-color': '#06b6d4',
@@ -269,8 +316,7 @@ map.on('load', async () => {
 // Popup Handling
 // ============================================================================
 function attachMapPopupHandlers() {
-  // Hex Click
-  map.on('click', 'flooded-hexes-fill', (e) => {
+  const showHexPopup = (e) => {
     if (!e.features || !e.features[0]) return;
     const props = e.features[0].properties;
 
@@ -294,14 +340,14 @@ function attachMapPopupHandlers() {
       </div>
       <div class="popup-row">
         <span class="popup-label">Elevation:</span>
-        <span class="popup-value">${Number(props.elevation_m).toFixed(1)} m</span>
+        <span class="popup-value">${formatElevation(props.elevation_m)}</span>
       </div>
       <div class="popup-row">
         <span class="popup-label">Nearest Prior:</span>
         <span class="popup-value">${props.nearest_place || 'None'}</span>
       </div>
       <div class="popup-why">
-        <strong>Risk Factors:</strong> ${props.why || 'Terrain convergence'}
+        <strong>Risk Factors:</strong> ${(props.why || 'Terrain convergence').replaceAll('-0.0m', '0.0m')}
       </div>
     `;
 
@@ -309,7 +355,11 @@ function attachMapPopupHandlers() {
       .setLngLat(e.lngLat)
       .setHTML(popupHtml)
       .addTo(map);
-  });
+  };
+
+  // Hex Polygon & Circle Point Clicks
+  map.on('click', 'flooded-hexes-fill', showHexPopup);
+  map.on('click', 'flooded-hexes-points-layer', showHexPopup);
 
   // Underpasses Click
   map.on('click', 'underpasses-layer', (e) => {
@@ -345,7 +395,7 @@ function attachMapPopupHandlers() {
   map.on('click', 'spots-test-layer', handleSpotClick);
 
   // Pointer cursor styling
-  ['flooded-hexes-fill', 'underpasses-layer', 'spots-dev-layer', 'spots-test-layer'].forEach((layerId) => {
+  ['flooded-hexes-fill', 'flooded-hexes-points-layer', 'underpasses-layer', 'spots-dev-layer', 'spots-test-layer'].forEach((layerId) => {
     map.on('mouseenter', layerId, () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', layerId, () => (map.getCanvas().style.cursor = ''));
   });
@@ -364,12 +414,28 @@ async function loadFloodedHexes() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
 
+    // 1. Update polygon hex source
     const src = map.getSource('flooded-hexes');
     if (src) {
       src.setData(data);
     }
 
-    // Update live count indicator
+    // 2. Update centroid circle point source for low zoom visibility
+    const ptSrc = map.getSource('flooded-hexes-points');
+    if (ptSrc && data.features) {
+      const pointFeatures = data.features.map((f) => ({
+        type: 'Feature',
+        id: f.id,
+        geometry: {
+          type: 'Point',
+          coordinates: [f.properties.lon, f.properties.lat],
+        },
+        properties: f.properties,
+      }));
+      ptSrc.setData({ type: 'FeatureCollection', features: pointFeatures });
+    }
+
+    // 3. Update live count indicator
     const totalCount = data.metadata ? data.metadata.total_flooded_hexes : 0;
     const countEl = document.getElementById('flooded-count-val');
     const pctEl = document.getElementById('flooded-pct-val');
@@ -380,7 +446,24 @@ async function loadFloodedHexes() {
       pctEl.textContent = `${pct}%`;
     }
 
-    if (overlay) overlay.textContent = `Displaying Top-${data.features.length} Flooded Hexes (${state.city.toUpperCase()})`;
+    if (overlay) {
+      overlay.textContent = `Showing top ${data.features.length} of ${totalCount.toLocaleString()} flooded (${state.city.toUpperCase()})`;
+    }
+
+    // 4. Fit map to flooded hexes on load and when slider changes
+    if (data.features && data.features.length > 0) {
+      const bounds = new maplibregl.LngLatBounds();
+      data.features.forEach((f) => {
+        if (f.geometry && f.geometry.coordinates && f.geometry.coordinates[0]) {
+          f.geometry.coordinates[0].forEach((pt) => bounds.extend(pt));
+        } else if (f.properties && f.properties.lon && f.properties.lat) {
+          bounds.extend([f.properties.lon, f.properties.lat]);
+        }
+      });
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, { padding: 50, maxZoom: 13, duration: 600 });
+      }
+    }
   } catch (err) {
     console.error('[Hotspots Error]', err);
     if (overlay) overlay.textContent = 'Error loading hotspots';
@@ -422,7 +505,7 @@ async function loadEvidenceData() {
     const resp = await fetch('/eval/results');
     if (!resp.ok) return;
     state.evaluationData = await resp.json();
-    renderEvidenceTable();
+    renderAllEvidence();
   } catch (err) {
     console.warn('[Evidence Error]', err);
   }
@@ -613,6 +696,12 @@ async function handleSendMessage(promptText) {
 // ============================================================================
 // Evidence Tab Rendering
 // ============================================================================
+function renderAllEvidence() {
+  renderEvidenceTable();
+  renderPairedCiTable();
+  renderEvidenceTakeaways();
+}
+
 function renderEvidenceTable() {
   const tbody = document.getElementById('evidence-table-body');
   if (!tbody || !state.evaluationData || !state.evaluationData.splits) return;
@@ -662,6 +751,60 @@ function renderEvidenceTable() {
     `;
     tbody.appendChild(tr);
   });
+}
+
+function renderPairedCiTable() {
+  const container = document.getElementById('paired-ci-container');
+  const tbody = document.getElementById('paired-ci-table-body');
+  if (!container || !tbody) return;
+
+  if (state.activeSplit !== 'test' || !state.evaluationData || !state.evaluationData.paired_bootstrap_cis) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  tbody.innerHTML = '';
+
+  const pairedData = state.evaluationData.paired_bootstrap_cis;
+  [25, 50, 100, 200].forEach((k) => {
+    const p = pairedData[k];
+    if (!p) return;
+
+    const tr = document.createElement('tr');
+    const diffPct = (p.diff * 100).toFixed(1);
+    const ciLow = (p.ci_95[0] * 100).toFixed(1);
+    const ciHigh = (p.ci_95[1] * 100).toFixed(1);
+    const isDist = p.distinguishable;
+
+    tr.innerHTML = `
+      <td><strong>K = ${k}</strong></td>
+      <td>${(p.fl_recall * 100).toFixed(1)}%</td>
+      <td>${(p.up_recall * 100).toFixed(1)}%</td>
+      <td style="color: ${p.diff > 0 ? 'var(--cyan)' : 'var(--amber)'}; font-weight: 600;">
+        ${p.diff > 0 ? '+' : ''}${diffPct}%
+      </td>
+      <td>[${ciLow}%, ${ciHigh}%]</td>
+      <td><span class="badge ${isDist ? 'badge-accent' : ''}">${isDist ? 'Yes' : 'No (CI spans 0)'}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderEvidenceTakeaways() {
+  const summaryList = document.getElementById('evidence-summary-list');
+  if (!summaryList || !state.evaluationData) return;
+
+  summaryList.innerHTML = '';
+
+  const items = state.evaluationData.summary || [];
+  if (items.length > 0) {
+    items.forEach((txt) => {
+      const li = document.createElement('li');
+      li.textContent = txt;
+      summaryList.appendChild(li);
+    });
+  }
 }
 
 // ============================================================================
@@ -776,7 +919,7 @@ function setupEventListeners() {
       btnChat.classList.remove('active');
       tabEvidence.classList.add('active');
       tabChat.classList.remove('active');
-      renderEvidenceTable();
+      renderAllEvidence();
     });
   }
 
@@ -787,7 +930,7 @@ function setupEventListeners() {
       splitBtns.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.activeSplit = btn.dataset.split;
-      renderEvidenceTable();
+      renderAllEvidence();
     });
   });
 

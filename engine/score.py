@@ -319,9 +319,10 @@ def compute_scores(df: pd.DataFrame) -> pd.DataFrame:
             factors.append((w["underpass_prior"] * 1.5, "Submerged road underpass prior"))
 
         hand_val = float(scored["min_hand"].iloc[i])
+        hand_disp = 0.0 if abs(hand_val) < 0.05 else hand_val
         if p_hand_inv[i] >= 0.70:
             factors.append(
-                (w["hand_inv"] * p_hand_inv[i], f"Low drainage clearance (HAND {hand_val:.1f}m)")
+                (w["hand_inv"] * p_hand_inv[i], f"Low drainage clearance (HAND {hand_disp:.1f}m)")
             )
 
         twi_val = float(scored["max_twi"].iloc[i])

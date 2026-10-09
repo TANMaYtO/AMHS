@@ -207,6 +207,7 @@ def evaluate_tie_fair_baseline(
 
     # Store representative hit dictionary for bootstrap CI calculation
     first_hits: dict[int, dict[str, np.ndarray]] | None = None
+    all_draw_hits: list[dict[int, dict[str, np.ndarray]]] = []
 
     for draw in range(n_draws):
         # Add tiny uniform jitter to break ties fairly at random
@@ -219,6 +220,7 @@ def evaluate_tie_fair_baseline(
         )
         if draw == 0:
             first_hits = hits_per_k
+        all_draw_hits.append(hits_per_k)
 
         for k, h_dict in hits_per_k.items():
             metrics = compute_recall_metrics(h_dict, point_mask, stretch_mask)
@@ -237,7 +239,7 @@ def evaluate_tie_fair_baseline(
     assert first_hits is not None
     cis = bootstrap_ci(first_hits, point_mask, stretch_mask)
 
-    return avg_metrics, cis, tie_counts
+    return avg_metrics, cis, tie_counts, all_draw_hits
 
 
 def evaluate_deterministic_ranking(
@@ -251,6 +253,7 @@ def evaluate_deterministic_ranking(
     dict[int, dict[str, float]],
     dict[int, dict[str, tuple[float, float]]],
     dict[int, int],
+    dict[int, dict[str, np.ndarray]],
 ]:
     """Compute recall and bootstrap CIs for unique/deterministic score vector."""
     rank_order = np.argsort(-ranking_scores)
@@ -266,7 +269,53 @@ def evaluate_deterministic_ranking(
         )
 
     ci_per_k = bootstrap_ci(hits_per_k, point_mask, stretch_mask)
-    return metrics_per_k, ci_per_k, tie_counts
+    return metrics_per_k, ci_per_k, tie_counts, hits_per_k
+
+
+def compute_paired_bootstrap_cis(
+    fl_hits: dict[int, dict[str, np.ndarray]],
+    up_draw_hits: list[dict[int, dict[str, np.ndarray]]],
+    n_spots: int,
+    k_values: list[int] = [25, 50, 100, 200],
+    n_bootstraps: int = 1000,
+    seed: int = 42,
+) -> dict[int, dict[str, Any]]:
+    """Calculate 95% paired bootstrap confidence intervals for (FloodLens - Underpass Prior)."""
+    rng = np.random.default_rng(seed)
+    paired_results: dict[int, dict[str, Any]] = {}
+    n_draws = len(up_draw_hits)
+
+    for k in k_values:
+        fl_hit_vec = fl_hits[k]["comb_300"].astype(float)
+        # up_matrix shape: (n_draws, n_spots)
+        up_matrix = np.array([draw[k]["comb_300"].astype(float) for draw in up_draw_hits])
+
+        fl_mean_rec = float(fl_hit_vec.mean())
+        up_mean_rec = float(up_matrix.mean())
+        point_diff = fl_mean_rec - up_mean_rec
+
+        boot_diffs: list[float] = []
+        for _ in range(n_bootstraps):
+            spot_idx = rng.choice(n_spots, size=n_spots, replace=True)
+            draw_idx = rng.choice(n_draws)
+            b_fl = fl_hit_vec[spot_idx].mean()
+            b_up = up_matrix[draw_idx, spot_idx].mean()
+            boot_diffs.append(float(b_fl - b_up))
+
+        ci_low = float(np.percentile(boot_diffs, 2.5))
+        ci_high = float(np.percentile(boot_diffs, 97.5))
+        is_distinguishable = bool(not (ci_low <= 0.0 <= ci_high))
+
+        paired_results[k] = {
+            "fl_recall": round(fl_mean_rec, 4),
+            "up_recall": round(up_mean_rec, 4),
+            "diff": round(point_diff, 4),
+            "ci_95": [round(ci_low, 4), round(ci_high, 4)],
+            "distinguishable": is_distinguishable,
+        }
+
+    return paired_results
+
 
 
 def run_random_baseline(
@@ -503,6 +552,7 @@ def run_evaluation() -> None:
     splits = ["dev", "test"]
     all_results: dict[str, dict[str, Any]] = {}
     tie_reports: dict[str, dict[int, int]] = {}
+    test_paired_cis: dict[int, dict[str, Any]] = {}
 
     for split in splits:
         split_spots = spots_df[spots_df["split"] == split].reset_index(drop=True)
@@ -520,7 +570,7 @@ def run_evaluation() -> None:
         all_results[split] = {}
 
         # 1. Evaluate FloodLens Composite Model
-        fl_metrics, fl_cis, fl_ties = evaluate_deterministic_ranking(
+        fl_metrics, fl_cis, fl_ties, fl_hits = evaluate_deterministic_ranking(
             floodlens_scores,
             hex_coords_m,
             spot_coords_m,
@@ -536,8 +586,9 @@ def run_evaluation() -> None:
         tie_reports["FloodLens (Composite)"] = fl_ties
 
         # 2. Evaluate Tie-Fair Baselines (averaged over 200 draws)
+        underpass_draw_hits: list[dict[int, dict[str, np.ndarray]]] = []
         for b_name, b_scores in tie_fair_baselines.items():
-            b_metrics, b_cis, b_ties = evaluate_tie_fair_baseline(
+            b_metrics, b_cis, b_ties, b_draw_hits = evaluate_tie_fair_baseline(
                 b_scores,
                 hex_coords_m,
                 spot_coords_m,
@@ -546,12 +597,23 @@ def run_evaluation() -> None:
                 k_values,
                 n_draws=200,
             )
+            if b_name == "Underpass Prior Only":
+                underpass_draw_hits = b_draw_hits
+
             all_results[split][b_name] = {
                 "metrics": b_metrics,
                 "cis": b_cis,
                 "ties": b_ties,
             }
             tie_reports[b_name] = b_ties
+
+        if split == "test":
+            test_paired_cis = compute_paired_bootstrap_cis(
+                fl_hits,
+                underpass_draw_hits,
+                len(split_spots),
+                k_values,
+            )
 
         # 3. Evaluate Random Baseline (uniform sample from all 41,703 hexes)
         rand_metrics, rand_cis = run_random_baseline(
@@ -610,7 +672,7 @@ def run_evaluation() -> None:
 
     # Generate results.md
     generate_markdown_report(
-        all_results, spots_df, tie_reports, ablation_data, city_data
+        all_results, spots_df, tie_reports, ablation_data, city_data, test_paired_cis
     )
 
 
@@ -620,6 +682,7 @@ def generate_markdown_report(
     tie_reports: dict[str, dict[int, int]],
     ablation_data: dict[str, dict[str, dict[int, float]]],
     city_data: dict[str, dict[str, Any]],
+    paired_cis: dict[int, dict[str, Any]],
 ) -> None:
     """Generate eval/results.md containing benchmark results, ties, ablation, and city analysis."""
     dev_n = len(spots_df[spots_df["split"] == "dev"])
@@ -675,6 +738,23 @@ def generate_markdown_report(
             row_str += f"{val:.1f}% [{ci_low*100:.1f}–{ci_high*100:.1f}%] | "
         row_str += f"{tie_str} |"
         lines.append(row_str)
+
+    lines.extend([
+        "",
+        "### Paired Bootstrap Difference on Test: FloodLens vs Underpass Prior Only",
+        "",
+        "| Rank Cutoff | FloodLens Recall | Underpass Prior Recall | Difference (FL − UP) | 95% Bootstrap CI | Statistically Distinguishable? |",
+        "|---|---|---|---|---|---|",
+    ])
+    for k in [25, 50, 100, 200]:
+        p = paired_cis[k]
+        diff_str = f"{p['diff']*100:+.1f}%"
+        ci_str = f"[{p['ci_95'][0]*100:+.1f}%, {p['ci_95'][1]*100:+.1f}%]"
+        dist_str = "Yes" if p["distinguishable"] else "No (CI spans 0)"
+        lines.append(
+            f"| **K = {k}** | {p['fl_recall']*100:.1f}% | {p['up_recall']*100:.1f}% | "
+            f"{diff_str} | {ci_str} | {dist_str} |"
+        )
 
     lines.extend([
         "",
@@ -763,17 +843,18 @@ def generate_markdown_report(
         "",
         "## 5. Exploratory Analysis: City-Stratified Operational Ranking",
         "",
-        "> [!NOTE]",
-        "> **Post-Hoc Operational Realism**: Municipal disaster response units in Delhi and Gurugram operate separate emergency control rooms. Ranking across the unified regional bbox forces Delhi and Gurugram sites to compete against one another for the top-$K$ slots. This exploratory post-hoc analysis evaluates Recall@K when ranking within each municipal jurisdiction separately.",
+        "> [!WARNING]",
+        "> **Exploratory Post-Hoc Analysis Only**: The Gurugram stratified evaluation uses DEV spots from 2026-07-08 and 2026-08-06 that informed tuning. It is an exploratory post-hoc check only and must not be interpreted as out-of-sample validation.",
         "",
-        "| Control Room / City Jurisdiction | Hex Pool Size | Evaluated Spots | Split | Recall@25 | Recall@50 | Recall@100 | Recall@200 |",
+        "| Control Room / City Jurisdiction | Hex Pool Size | Evaluated Spots | Split Status | Recall@25 | Recall@50 | Recall@100 | Recall@200 |",
         "|---|---|---|---|---|---|---|---|",
     ])
 
     for city_name, c_data in city_data.items():
         m = c_data["metrics"]
+        split_label = "DEV (Informed Tuning - Exploratory)" if c_data["split"] == "dev" else "TEST (Held-Out)"
         lines.append(
-            f"| **{city_name}** | {c_data['n_hexes']:,} hexes | {c_data['n_spots']} spots | {c_data['split'].upper()} | "
+            f"| **{city_name}** | {c_data['n_hexes']:,} hexes | {c_data['n_spots']} spots | {split_label} | "
             f"{m[25]['comb_300']*100:.1f}% | {m[50]['comb_300']*100:.1f}% | {m[100]['comb_300']*100:.1f}% | {m[200]['comb_300']*100:.1f}% |"
         )
 
@@ -783,14 +864,14 @@ def generate_markdown_report(
         "",
         "## 6. Plain-Language Honest Assessment",
         "",
-        "1. **Does FloodLens Beat the Baselines?**",
-        "   - **Versus Random Uniform**: FloodLens substantially outperforms uniform random selection at all thresholds ($58.8\\%$ vs $11.9\\%$ at $K=200$, $35.3\\%$ vs $6.7\\%$ at $K=100$).",
-        "   - **Versus Underpass Prior Only**: On the test split (Delhi surface avenues), Underpass Prior achieves **0.0% Recall@100** because the flooded sites were major surface boulevards, not underpasses. FloodLens captures both underpasses and broad surface convergence, achieving **35.3% Recall@100**.",
-        "   - **Versus TWI Only**: TWI alone performs remarkably well on stretch/area corridors, demonstrating that topographical wetness convergence is the single strongest physical driver in flat urban terrain. However, TWI alone lacks built-up imperviousness weighting and misses isolated subterranean structural depressions.",
-        "   - **The Tie-Breaking Problem**: As demonstrated in the Cutoff Ties column, unaugmented physical features suffer from severe degenerate ties (e.g., HAND has over 5,000 hexes tied at 0.0m; Underpass has 41,085 hexes tied at 0). Composite scoring eliminates discrete tie ambiguity.",
-        "2. **Ablation Findings**: Dropping **TWI** or **Flow Accumulation** causes the sharpest drop in test corridor recall, confirming that upslope runoff accumulation is essential for capturing surface avenue waterlogging. Dropping **Underpass Prior** sharply degrades DEV performance (where Hero Honda and Subhash Chowk underpasses dominate).",
+        "1. **Baseline Comparisons**:",
+        "   - **Versus Random, TWI, HAND, Built-up, and Elevation**: FloodLens is far above uniform random ($58.8\\%$ vs $10.8\\%$ at $K=200$), TWI-only ($5.9\\%$ at $K=200$), HAND-only ($0.0\\%$), built-up-only ($5.7\\%$), and elevation-only ($0.0\\%$).",
+        "   - **Versus Underpass Prior Only**: The underpass-prior-only baseline is comparable or better at early thresholds ($11.3\\%$ vs $5.9\\%$ at $K=25$; $21.4\\%$ vs $11.8\\%$ at $K=50$), equal at $K=100$ ($35.3\\%$ vs $35.3\\%$), and lower at $K=200$ ($51.1\\%$ vs $58.8\\%$).",
+        "   - **Statistical Distinguishability**: In paired bootstrap analysis on the test split ($N=17$), the $K=200$ difference ($+7.8\\%$) yields a 95% confidence interval of $[-23.5\\%, +35.3\\%]$, which spans zero and is **not statistically distinguishable** at $\\alpha=0.05$.",
+        "   - **Role of the Underpass Prior & Composite Model**: The underpass prior contributes much of the top-of-list signal. The composite model adds corridor coverage across surface avenues plus severity and rainfall scaling, eliminating discrete tie degeneracy (Underpass Prior has 41,085 tied zero-cells).",
+        "2. **Ablation Findings**: Dropping **TWI** or **Flow Accumulation** causes the sharpest drop in test corridor recall, confirming that upslope runoff accumulation is essential for capturing surface avenue waterlogging. Dropping **Underpass Prior** degrades performance where chronic underpass sites dominate.",
         "3. **Point Spot Limitation**: On point spots at strict 300 m tolerance, Recall was 0 of 3 on test. Coarse news-derived point coordinates require ~500m to 1,000m tolerance to intersect 30m grid-derived hex centers.",
-        "4. **Operational Jurisdiction**: City-stratified ranking demonstrates that when emergency control rooms rank strictly within their own city boundaries, early recall accelerates dramatically (e.g., reaching **50.0% Recall@25** and **66.7% Recall@50** for Gurugram).",
+        "4. **City Stratification**: When evaluated strictly within city boundaries, early ranking shifts (reaching 50.0% at K=25 in Gurugram). Note that Gurugram evaluation uses DEV spots that informed tuning and is strictly exploratory.",
         "",
     ])
 
@@ -824,13 +905,31 @@ def generate_markdown_report(
             "computed via 1,000 bootstrap resamples."
         ),
         "splits": serialize_data(results),
+        "paired_bootstrap_cis": serialize_data(paired_cis),
         "ablation": serialize_data(ablation_data),
         "city_stratified": serialize_data(city_data),
         "summary": [
-            "FloodLens outperforms uniform random at all thresholds (58.8% vs 11.9% at K=200).",
-            "Underpass Prior alone achieves 0.0% Recall@100 on test split because test sites were surface boulevards.",
-            "TWI alone performs strongly on corridors but suffers from discrete tie degeneracies.",
-            "City-stratified ranking accelerates early recall (up to 66.7% Recall@50 for Gurugram).",
+            (
+                "FloodLens composite is far above uniform random (58.8% vs 10.8% at K=200), "
+                "TWI-only (5.9%), HAND-only (0.0%), built-up-only (5.7%), and elevation-only (0.0%)."
+            ),
+            (
+                "The underpass-prior-only baseline is comparable or better at early thresholds "
+                "(11.3% vs 5.9% at K=25; 21.4% vs 11.8% at K=50), equal at K=100 (35.3% vs 35.3%), "
+                "and lower at K=200 (51.1% vs 58.8%)."
+            ),
+            (
+                "Per paired bootstrap 95% CI on test ([-23.5%, +35.3%]), the +7.8% difference at "
+                "K=200 is not statistically distinguishable from zero (alpha=0.05)."
+            ),
+            (
+                "The underpass prior contributes much of the top-of-list signal; the composite model "
+                "adds corridor coverage plus severity and rainfall scaling, eliminating discrete tie degeneracy."
+            ),
+            (
+                "City-stratified numbers (e.g. Gurugram reaching 50.0% Recall@25) are exploratory post-hoc "
+                "only because Gurugram spots belong to the DEV split that informed tuning."
+            ),
         ],
     }
 

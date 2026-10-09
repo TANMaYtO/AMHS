@@ -79,9 +79,9 @@
               <label>Top-N Hexes</label>
               <div class="pill-group" id="top-pills">
                 <button class="pill" data-top="10">10</button>
-                <button class="pill active" data-top="25">25</button>
+                <button class="pill" data-top="25">25</button>
                 <button class="pill" data-top="50">50</button>
-                <button class="pill" data-top="100">100</button>
+                <button class="pill active" data-top="100">100</button>
                 <button class="pill" data-top="200">200</button>
               </div>
             </div>
@@ -104,7 +104,7 @@
                 <span>Flooded Hexes (Severity Ramp)</span>
               </label>
               <label class="toggle-item">
-                <input type="checkbox" id="layer-underpasses" checked />
+                <input type="checkbox" id="layer-underpasses" />
                 <span>OSM Underpass Priors (<span id="underpass-count">--</span>)</span>
               </label>
               <label class="toggle-item">
@@ -256,13 +256,31 @@
                 </table>
               </div>
 
-              <div class="evidence-summary-box">
+              <div id="paired-ci-container" class="paired-ci-wrapper" style="margin-top: 1rem;">
+                <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--slate-200); margin-bottom: 0.5rem;">
+                  Paired Difference on Test Split: FloodLens vs Underpass Prior Only
+                </h4>
+                <table class="evidence-table" style="font-size: 0.78rem;">
+                  <thead>
+                    <tr>
+                      <th>Cutoff</th>
+                      <th>FloodLens</th>
+                      <th>Underpass Only</th>
+                      <th>Difference (FL − UP)</th>
+                      <th>95% Bootstrap CI</th>
+                      <th>Distinguishable?</th>
+                    </tr>
+                  </thead>
+                  <tbody id="paired-ci-table-body">
+                    <tr><td colspan="6" class="text-center">Loading paired bootstrap data...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="evidence-summary-box" style="margin-top: 1rem;">
                 <h4>Key Operational Takeaways</h4>
                 <ul id="evidence-summary-list">
-                  <li>FloodLens composite significantly outperforms random baseline at all thresholds.</li>
-                  <li>Underpass prior alone yields 0.0% Recall@100 on test split because extreme flooding occurred on broad avenues.</li>
-                  <li>Pure physical features (HAND, Underpass) suffer from degenerate tie cutoffs with thousands of tied cells.</li>
-                  <li>City-stratified ranking accelerates early response (reaching 66.7% Recall@50 for Gurugram).</li>
+                  <li class="loading-takeaways">Loading operational takeaways from benchmark results...</li>
                 </ul>
               </div>
             </div>

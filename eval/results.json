@@ -1798,6 +1798,48 @@
       }
     }
   },
+  "paired_bootstrap_cis": {
+    "25": {
+      "fl_recall": 0.0588,
+      "up_recall": 0.1132,
+      "diff": -0.0544,
+      "ci_95": [
+        -0.2941,
+        0.1765
+      ],
+      "distinguishable": 0
+    },
+    "50": {
+      "fl_recall": 0.1176,
+      "up_recall": 0.2141,
+      "diff": -0.0965,
+      "ci_95": [
+        -0.4118,
+        0.1765
+      ],
+      "distinguishable": 0
+    },
+    "100": {
+      "fl_recall": 0.3529,
+      "up_recall": 0.3532,
+      "diff": -0.0003,
+      "ci_95": [
+        -0.2941,
+        0.3529
+      ],
+      "distinguishable": 0
+    },
+    "200": {
+      "fl_recall": 0.5882,
+      "up_recall": 0.5106,
+      "diff": 0.0776,
+      "ci_95": [
+        -0.2353,
+        0.3529
+      ],
+      "distinguishable": 0
+    }
+  },
   "ablation": {
     "Without hand_inv": {
       "dev": {
@@ -2105,9 +2147,10 @@
     }
   },
   "summary": [
-    "FloodLens outperforms uniform random at all thresholds (58.8% vs 11.9% at K=200).",
-    "Underpass Prior alone achieves 0.0% Recall@100 on test split because test sites were surface boulevards.",
-    "TWI alone performs strongly on corridors but suffers from discrete tie degeneracies.",
-    "City-stratified ranking accelerates early recall (up to 66.7% Recall@50 for Gurugram)."
+    "FloodLens composite is far above uniform random (58.8% vs 10.8% at K=200), TWI-only (5.9%), HAND-only (0.0%), built-up-only (5.7%), and elevation-only (0.0%).",
+    "The underpass-prior-only baseline is comparable or better at early thresholds (11.3% vs 5.9% at K=25; 21.4% vs 11.8% at K=50), equal at K=100 (35.3% vs 35.3%), and lower at K=200 (51.1% vs 58.8%).",
+    "Per paired bootstrap 95% CI on test ([-23.5%, +35.3%]), the +7.8% difference at K=200 is not statistically distinguishable from zero (alpha=0.05).",
+    "The underpass prior contributes much of the top-of-list signal; the composite model adds corridor coverage plus severity and rainfall scaling, eliminating discrete tie degeneracy.",
+    "City-stratified numbers (e.g. Gurugram reaching 50.0% Recall@25) are exploratory post-hoc only because Gurugram spots belong to the DEV split that informed tuning."
   ]
 }

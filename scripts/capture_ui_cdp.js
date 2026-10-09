@@ -90,8 +90,58 @@ async function main() {
     });
   }
 
-  // 1. Wait for map & layers to load
-  console.log('Waiting 6s for MapLibre tiles and GeoJSON layers...');
+  async function waitForAgent(expectedCircles = 0, maxWaitMs = 65000) {
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      const res = await evalJs(`
+        (() => {
+          const msgs = document.querySelectorAll('.chat-message.agent-msg');
+          const lastMsg = msgs[msgs.length - 1];
+          if (!lastMsg) return { done: false, circles: 0, textLen: 0 };
+          const isThinking = !!lastMsg.querySelector('em');
+          const hasTable = !!lastMsg.querySelector('table');
+          const bodyEl = lastMsg.querySelector('.msg-body');
+          const bodyText = bodyEl ? bodyEl.textContent : '';
+          const hasContent = bodyText.length > 50;
+
+          let circleCount = 0;
+          if (window.map) {
+            try {
+              const feats = window.map.queryRenderedFeatures({ layers: ['agent-pumps-points-layer'] });
+              circleCount = feats ? feats.length : 0;
+            } catch (e) {}
+            if (circleCount === 0) {
+              const src = window.map.getSource('agent-pumps-radius');
+              if (src && src._data && src._data.features) {
+                circleCount = src._data.features.length;
+              }
+            }
+          }
+
+          const done = !isThinking && (hasTable || hasContent);
+          return {
+            done: done,
+            circles: circleCount,
+            textLen: bodyText.length,
+            hasTable: hasTable
+          };
+        })()
+      `);
+      const val = res && res.result && res.result.value;
+      if (val && val.done) {
+        if (expectedCircles === 0 || val.hasTable || val.circles >= expectedCircles) {
+          console.log(`Agent reply finished (len=${val.textLen}, hasTable=${val.hasTable}), circles detected: ${val.circles}`);
+          return val;
+        }
+      }
+      await sleep(1500);
+    }
+    console.warn(`Timeout waiting for agent (expectedCircles=${expectedCircles})`);
+    return null;
+  }
+
+  // 1. Wait for map & layers to load (40 mm/hr default overview, Top-N=100)
+  console.log('Waiting 6s for MapLibre tiles, point circle layer, and Top-N=100 hexes...');
   await sleep(6000);
   await capture('ui_overview.png');
 
@@ -102,7 +152,7 @@ async function main() {
     slider.value = 60;
     slider.dispatchEvent(new Event('input', { bubbles: true }));
   `);
-  await sleep(2000);
+  await sleep(2500);
   await capture('ui_slider_60.png');
 
   // 3. Test scenario chip: CP -> Cyber City route
@@ -111,12 +161,12 @@ async function main() {
     const chip = document.querySelector('.chip[data-prompt*="Cyber City"]');
     if (chip) chip.click();
   `);
-  // Agent query takes ~15-20s
-  console.log('Waiting 22s for agent response and route map rendering...');
-  await sleep(22000);
+  console.log('Waiting for route risk agent response and map line rendering...');
+  await waitForAgent(0, 60000);
+  await sleep(2000);
   await capture('ui_route_scenario.png');
 
-  // 4. Test Evidence Tab
+  // 4. Test Evidence Tab (dynamic takeaways & paired bootstrap table)
   console.log('Testing Evidence tab...');
   await evalJs(`
     const btn = document.getElementById('tab-btn-evidence');
@@ -125,16 +175,22 @@ async function main() {
   await sleep(2000);
   await capture('ui_evidence_tab.png');
 
-  // 5. Switch back to chat & test Pump Deployment Preset
+  // 5. Switch back to chat & test Pump Deployment Preset ('I have 6 pumps, where should they go for 60 mm/hr?')
   console.log('Testing 6 Pumps @ 60 mm/hr preset chip...');
   await evalJs(`document.getElementById('tab-btn-chat').click();`);
-  await sleep(500);
+  await sleep(600);
   await evalJs(`
     const pumpChip = document.querySelector('.chip[data-prompt*="6 pumps"]');
     if (pumpChip) pumpChip.click();
   `);
-  console.log('Waiting 22s for pump plan agent response and circle overlays...');
-  await sleep(22000);
+  console.log('Waiting for pump plan agent response and 6 coverage circle overlays...');
+  const pumpResult = await waitForAgent(6, 65000);
+  if (pumpResult && pumpResult.circles >= 6) {
+    console.log(`Confirmed: ${pumpResult.circles} pump coverage circles rendered on the map!`);
+  } else {
+    console.warn('Warning: pump coverage circles not fully detected before timeout.');
+  }
+  await sleep(2000);
   await capture('ui_pump_scenario.png');
 
   // 6. Test Hex Popup
@@ -146,6 +202,8 @@ async function main() {
       if (data.features && data.features.length > 0) {
         const feat = data.features[0];
         const props = feat.properties;
+        const elev = Number(props.elevation_m);
+        const elevStr = Math.abs(elev) < 0.05 ? '0.0 m' : elev.toFixed(1) + ' m';
         const popupHtml = \`
           <div class="popup-title">Flooded H3 Cell</div>
           <div class="popup-row">
@@ -166,14 +224,14 @@ async function main() {
           </div>
           <div class="popup-row">
             <span class="popup-label">Elevation:</span>
-            <span class="popup-value">\${Number(props.elevation_m).toFixed(1)} m</span>
+            <span class="popup-value">\${elevStr}</span>
           </div>
           <div class="popup-row">
             <span class="popup-label">Nearest Prior:</span>
             <span class="popup-value">\${props.nearest_place || 'None'}</span>
           </div>
           <div class="popup-why">
-            <strong>Risk Factors:</strong> \${props.why || 'Terrain convergence'}
+            <strong>Risk Factors:</strong> \${(props.why || 'Terrain convergence').replaceAll('-0.0m', '0.0m')}
           </div>
         \`;
         new maplibregl.Popup({ closeButton: true })

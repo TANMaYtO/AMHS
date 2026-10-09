@@ -32,6 +32,15 @@ This benchmark compares **FloodLens** against six baseline strategies across two
 | **Elevation Only** | 0.0% [0.0–0.0%] | 0.0% [0.0–0.0%] | 0.0% [0.0–0.0%] | 0.0% [0.0–0.0%] | 1 / 1 / 3 / 2 |
 | **Random Uniform (full 41,703 pool)** | 1.5% [0.0–17.6%] | 2.8% [0.0–29.4%] | 6.0% [0.0–29.4%] | 10.8% [0.0–35.3%] | 0 / 0 / 0 / 0 |
 
+### Paired Bootstrap Difference on Test: FloodLens vs Underpass Prior Only
+
+| Rank Cutoff | FloodLens Recall | Underpass Prior Recall | Difference (FL − UP) | 95% Bootstrap CI | Statistically Distinguishable? |
+|---|---|---|---|---|---|
+| **K = 25** | 5.9% | 11.3% | -5.4% | [-29.4%, +17.6%] | No (CI spans 0) |
+| **K = 50** | 11.8% | 21.4% | -9.7% | [-41.2%, +17.6%] | No (CI spans 0) |
+| **K = 100** | 35.3% | 35.3% | -0.0% | [-29.4%, +35.3%] | No (CI spans 0) |
+| **K = 200** | 58.8% | 51.1% | +7.8% | [-23.5%, +35.3%] | No (CI spans 0) |
+
 ### Breakdown by Geometry Type on Test Split
 
 #### Point Spots Only ($N=3$ on Test: Shankar Vihar, Peeragarhi, AIIMS)
@@ -93,23 +102,23 @@ To evaluate which hydrological and physical components drive model utility, each
 
 ## 5. Exploratory Analysis: City-Stratified Operational Ranking
 
-> [!NOTE]
-> **Post-Hoc Operational Realism**: Municipal disaster response units in Delhi and Gurugram operate separate emergency control rooms. Ranking across the unified regional bbox forces Delhi and Gurugram sites to compete against one another for the top-$K$ slots. This exploratory post-hoc analysis evaluates Recall@K when ranking within each municipal jurisdiction separately.
+> [!WARNING]
+> **Exploratory Post-Hoc Analysis Only**: The Gurugram stratified evaluation uses DEV spots from 2026-07-08 and 2026-08-06 that informed tuning. It is an exploratory post-hoc check only and must not be interpreted as out-of-sample validation.
 
-| Control Room / City Jurisdiction | Hex Pool Size | Evaluated Spots | Split | Recall@25 | Recall@50 | Recall@100 | Recall@200 |
+| Control Room / City Jurisdiction | Hex Pool Size | Evaluated Spots | Split Status | Recall@25 | Recall@50 | Recall@100 | Recall@200 |
 |---|---|---|---|---|---|---|---|
-| **Gurugram (GMDA)** | 7,021 hexes | 6 spots | DEV | 50.0% | 50.0% | 83.3% | 83.3% |
-| **Delhi (MCD/PWD)** | 34,682 hexes | 17 spots | TEST | 5.9% | 35.3% | 41.2% | 58.8% |
+| **Gurugram (GMDA)** | 7,021 hexes | 6 spots | DEV (Informed Tuning - Exploratory) | 50.0% | 50.0% | 83.3% | 83.3% |
+| **Delhi (MCD/PWD)** | 34,682 hexes | 17 spots | TEST (Held-Out) | 5.9% | 35.3% | 41.2% | 58.8% |
 
 ---
 
 ## 6. Plain-Language Honest Assessment
 
-1. **Does FloodLens Beat the Baselines?**
-   - **Versus Random Uniform**: FloodLens substantially outperforms uniform random selection at all thresholds ($58.8\%$ vs $11.9\%$ at $K=200$, $35.3\%$ vs $6.7\%$ at $K=100$).
-   - **Versus Underpass Prior Only**: On the test split (Delhi surface avenues), Underpass Prior achieves **0.0% Recall@100** because the flooded sites were major surface boulevards, not underpasses. FloodLens captures both underpasses and broad surface convergence, achieving **35.3% Recall@100**.
-   - **Versus TWI Only**: TWI alone performs remarkably well on stretch/area corridors, demonstrating that topographical wetness convergence is the single strongest physical driver in flat urban terrain. However, TWI alone lacks built-up imperviousness weighting and misses isolated subterranean structural depressions.
-   - **The Tie-Breaking Problem**: As demonstrated in the Cutoff Ties column, unaugmented physical features suffer from severe degenerate ties (e.g., HAND has over 5,000 hexes tied at 0.0m; Underpass has 41,085 hexes tied at 0). Composite scoring eliminates discrete tie ambiguity.
-2. **Ablation Findings**: Dropping **TWI** or **Flow Accumulation** causes the sharpest drop in test corridor recall, confirming that upslope runoff accumulation is essential for capturing surface avenue waterlogging. Dropping **Underpass Prior** sharply degrades DEV performance (where Hero Honda and Subhash Chowk underpasses dominate).
+1. **Baseline Comparisons**:
+   - **Versus Random, TWI, HAND, Built-up, and Elevation**: FloodLens is far above uniform random ($58.8\%$ vs $10.8\%$ at $K=200$), TWI-only ($5.9\%$ at $K=200$), HAND-only ($0.0\%$), built-up-only ($5.7\%$), and elevation-only ($0.0\%$).
+   - **Versus Underpass Prior Only**: The underpass-prior-only baseline is comparable or better at early thresholds ($11.3\%$ vs $5.9\%$ at $K=25$; $21.4\%$ vs $11.8\%$ at $K=50$), equal at $K=100$ ($35.3\%$ vs $35.3\%$), and lower at $K=200$ ($51.1\%$ vs $58.8\%$).
+   - **Statistical Distinguishability**: In paired bootstrap analysis on the test split ($N=17$), the $K=200$ difference ($+7.8\%$) yields a 95% confidence interval of $[-23.5\%, +35.3\%]$, which spans zero and is **not statistically distinguishable** at $\alpha=0.05$.
+   - **Role of the Underpass Prior & Composite Model**: The underpass prior contributes much of the top-of-list signal. The composite model adds corridor coverage across surface avenues plus severity and rainfall scaling, eliminating discrete tie degeneracy (Underpass Prior has 41,085 tied zero-cells).
+2. **Ablation Findings**: Dropping **TWI** or **Flow Accumulation** causes the sharpest drop in test corridor recall, confirming that upslope runoff accumulation is essential for capturing surface avenue waterlogging. Dropping **Underpass Prior** degrades performance where chronic underpass sites dominate.
 3. **Point Spot Limitation**: On point spots at strict 300 m tolerance, Recall was 0 of 3 on test. Coarse news-derived point coordinates require ~500m to 1,000m tolerance to intersect 30m grid-derived hex centers.
-4. **Operational Jurisdiction**: City-stratified ranking demonstrates that when emergency control rooms rank strictly within their own city boundaries, early recall accelerates dramatically (e.g., reaching **50.0% Recall@25** and **66.7% Recall@50** for Gurugram).
+4. **City Stratification**: When evaluated strictly within city boundaries, early ranking shifts (reaching 50.0% at K=25 in Gurugram). Note that Gurugram evaluation uses DEV spots that informed tuning and is strictly exploratory.
