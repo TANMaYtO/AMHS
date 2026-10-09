@@ -3,290 +3,296 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FloodLens — Delhi-NCR Urban Drainage Control Room</title>
-    <link rel="stylesheet" href="node_modules/maplibre-gl/dist/maplibre-gl.css" />
+    <title>FloodLens — Delhi-NCR Urban Drainage Planning</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <div id="app">
-      <!-- Top Operational Header -->
+      <!-- Top Cartographic Header -->
       <header id="header">
-        <div class="header-left">
-          <div class="status-indicator"></div>
-          <div class="header-title">
-            <h1>FLOODLENS</h1>
-            <span class="header-subtitle">DELHI-NCR DRAINAGE CONTROL ROOM</span>
-          </div>
+        <div class="header-brand">
+          <h1 class="brand-title">FloodLens</h1>
+          <span class="brand-divider">/</span>
+          <span class="brand-sub">Delhi-NCR drainage planning</span>
         </div>
-        <div class="header-center">
-          <span class="badge badge-accent">MODEL: FROZEN (v1-model-frozen)</span>
-          <span class="badge">H3 RES-9 (~174m)</span>
-          <span class="badge">POOL: 41,703 HEXES</span>
-          <span class="badge badge-warning">RELATIVE DISPLAY SCALE</span>
-        </div>
-        <div class="header-right">
-          <div id="clock" class="mono-text">--:--:-- UTC</div>
+        <div class="header-actions">
+          <button id="btn-about" class="btn-subtle" type="button" aria-haspopup="dialog">
+            About this model
+          </button>
         </div>
       </header>
 
-      <!-- Main 3-Column Layout -->
+      <!-- Main Layout: Full Bleed Map with Floating Controls + Docked Right Panel -->
       <main id="main-container">
-        <!-- Left Panel: Controls & Scenario Config -->
-        <aside id="left-panel">
-          <div class="panel-section">
-            <div class="section-title">RAINFALL SCENARIO</div>
-            
-            <div class="control-group">
-              <div class="control-header">
-                <label for="rainfall-slider">Rainfall Rate</label>
-                <span class="val-display"><strong id="rainfall-val">40</strong> mm/hr</span>
-              </div>
-              <input
-                type="range"
-                id="rainfall-slider"
-                min="10"
-                max="100"
-                step="5"
-                value="40"
-              />
-              <div class="slider-ticks">
-                <span>10</span>
-                <span>25</span>
-                <span>40</span>
-                <span>60</span>
-                <span>80</span>
-                <span>100</span>
-              </div>
-            </div>
-
-            <div class="stat-card">
-              <div class="stat-label">Modelled Flooded Hexes</div>
-              <div class="stat-value">
-                <span id="flooded-count-val">1,243</span>
-                <span class="stat-sub">/ 41,703 (<span id="flooded-pct-val">3.0%</span>)</span>
-              </div>
-            </div>
-
-            <button id="btn-forecast" class="btn btn-secondary w-full">
-              <span class="btn-icon">&#9729;</span> Use Forecast Peak (Delhi)
-            </button>
-          </div>
-
-          <div class="panel-section">
-            <div class="section-title">HOTSPOT FILTERS</div>
-            
-            <div class="control-group">
-              <label>Top-N Hexes</label>
-              <div class="pill-group" id="top-pills">
-                <button class="pill" data-top="10">10</button>
-                <button class="pill" data-top="25">25</button>
-                <button class="pill" data-top="50">50</button>
-                <button class="pill active" data-top="100">100</button>
-                <button class="pill" data-top="200">200</button>
-              </div>
-            </div>
-
-            <div class="control-group">
-              <label>City Jurisdiction</label>
-              <div class="pill-group" id="city-pills">
-                <button class="pill active" data-city="all">All NCR</button>
-                <button class="pill" data-city="delhi">Delhi</button>
-                <button class="pill" data-city="gurugram">Gurugram</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel-section">
-            <div class="section-title">MAP LAYERS</div>
-            <div class="toggle-list">
-              <label class="toggle-item">
-                <input type="checkbox" id="layer-hexes" checked />
-                <span>Flooded Hexes (Severity Ramp)</span>
-              </label>
-              <label class="toggle-item">
-                <input type="checkbox" id="layer-underpasses" />
-                <span>OSM Underpass Priors (<span id="underpass-count">--</span>)</span>
-              </label>
-              <label class="toggle-item">
-                <input type="checkbox" id="layer-spots" checked />
-                <span>Ground Truth Spots (<span id="spots-count">--</span>)</span>
-              </label>
-              <label class="toggle-item">
-                <input type="checkbox" id="layer-overlays" checked />
-                <span>Agent Overlays (Pumps / Routes)</span>
-              </label>
-            </div>
-          </div>
-
-          <div class="panel-section">
-            <div class="section-title">LEGEND</div>
-            <div class="legend-container">
-              <div class="legend-row">
-                <span class="legend-label">Hex Severity (mm / trigger):</span>
-              </div>
-              <div class="severity-gradient-bar"></div>
-              <div class="gradient-labels">
-                <span>1.0x (Triggered)</span>
-                <span>2.0x (Moderate)</span>
-                <span>&gt;3.0x (Severe)</span>
-              </div>
-
-              <div class="legend-items">
-                <div class="legend-item">
-                  <span class="legend-dot dot-underpass"></span>
-                  <span>OSM Underpass Prior</span>
-                </div>
-                <div class="legend-item">
-                  <span class="legend-dot dot-dev"></span>
-                  <span>Ground Truth (Dev Split)</span>
-                </div>
-                <div class="legend-item">
-                  <span class="legend-dot dot-test"></span>
-                  <span>Ground Truth (Test Split)</span>
-                </div>
-                <div class="legend-item">
-                  <span class="legend-dot dot-pump"></span>
-                  <span>Pump Coverage (1.5 km)</span>
-                </div>
-                <div class="legend-item">
-                  <span class="legend-line line-route"></span>
-                  <span>Agent Corridor Route</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="disclaimer-footer">
-            <p><strong>Disclaimer:</strong> Relative susceptibility index; display scale, not calibrated flood physics.</p>
-          </div>
-        </aside>
-
-        <!-- Center Panel: MapLibre Map -->
-        <section id="center-panel">
+        <!-- Map Area -->
+        <section id="map-section">
           <div id="map"></div>
-          <div id="map-status-overlay">
-            <div id="map-status-text">Ready</div>
+
+          <!-- Top-Left Floating Controls: Jurisdiction, Hotspots Count & Layers -->
+          <div class="floating-controls-top">
+            <div class="control-card filter-card">
+              <div class="control-row">
+                <span class="control-label">Jurisdiction</span>
+                <div class="segmented-control" id="city-selector">
+                  <button class="seg-btn active" data-city="all" type="button">All</button>
+                  <button class="seg-btn" data-city="delhi" type="button">Delhi</button>
+                  <button class="seg-btn" data-city="gurugram" type="button">Gurugram</button>
+                </div>
+              </div>
+              <div class="control-divider"></div>
+              <div class="control-row">
+                <span class="control-label">Hotspots shown</span>
+                <div class="segmented-control" id="top-selector">
+                  <button class="seg-btn" data-top="25" type="button">25</button>
+                  <button class="seg-btn active" data-top="100" type="button">100</button>
+                  <button class="seg-btn" data-top="200" type="button">200</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Layer Toggle Card -->
+            <div class="control-card layers-card">
+              <div class="card-header-compact">
+                <span class="control-label">Layers</span>
+              </div>
+              <div class="toggle-list">
+                <label class="toggle-row">
+                  <input type="checkbox" id="layer-hexes" checked />
+                  <span>Flooded cells</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="layer-underpasses" />
+                  <span>Underpass priors (<span id="underpass-count">--</span>)</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="layer-spots" checked />
+                  <span>Ground truth spots (<span id="spots-count">--</span>)</span>
+                </label>
+                <label class="toggle-row">
+                  <input type="checkbox" id="layer-overlays" checked />
+                  <span>Pump and route overlays</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Map Permanent Caption (Bottom Left) -->
+          <div class="map-caption-pill">
+            Relative risk index for planning at about 1 km. Not a forecast of water depth.
+          </div>
+
+          <!-- Map Legend (Bottom Right of map area, above bottom bar) -->
+          <div class="map-legend-card">
+            <div class="legend-title">Risk severity (intensity / trigger)</div>
+            <div class="severity-ramp-bar"></div>
+            <div class="ramp-ticks">
+              <span>1.0&times; Triggered</span>
+              <span>2.0&times;</span>
+              <span>3.0&times; Severe</span>
+            </div>
+            <div class="legend-markers">
+              <span class="legend-marker-item">
+                <span class="marker-diamond marker-diamond-dev"></span>
+                <span>Dev spot</span>
+              </span>
+              <span class="legend-marker-item">
+                <span class="marker-diamond marker-diamond-test"></span>
+                <span>Test spot</span>
+              </span>
+              <span class="legend-marker-item">
+                <span class="marker-circle marker-pump"></span>
+                <span>1.5 km pump</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Bottom Bar: Interactive Flood Curve Scrubber -->
+          <div id="flood-curve-bar">
+            <div class="curve-stat-block">
+              <div class="curve-primary-readout">
+                <span id="curve-cells-count" class="readout-num">1,243</span>
+                <span class="readout-label">cells may waterlog at</span>
+                <span id="curve-mm-display" class="readout-mm">40 mm/hr</span>
+              </div>
+              <div class="curve-secondary-readout">
+                <span id="curve-pct-display">3.0%</span> of 41,703 study cells
+              </div>
+            </div>
+
+            <!-- SVG Flood Curve Chart with Draggable Scrubber -->
+            <div class="curve-chart-container" id="curve-chart-wrapper" tabindex="0" role="slider" aria-label="Rainfall scenario intensity" aria-valuemin="10" aria-valuemax="100" aria-valuenow="40">
+              <svg id="flood-curve-svg" viewBox="0 0 480 66" preserveAspectRatio="none">
+                <!-- SVG elements injected dynamically -->
+              </svg>
+            </div>
+
+            <div class="curve-actions">
+              <button id="btn-use-forecast" class="btn-control" type="button">
+                Use forecast peak
+              </button>
+            </div>
           </div>
         </section>
 
-        <!-- Right Panel: Agent Chat & Evidence Tabs -->
+        <!-- Right Panel: Docked Survey Sheet Tabs (400px wide) -->
         <aside id="right-panel">
-          <div class="tab-header">
-            <button id="tab-btn-chat" class="tab-btn active">Control Room Agent</button>
-            <button id="tab-btn-evidence" class="tab-btn">Benchmark Evidence</button>
-          </div>
+          <nav class="panel-tabs">
+            <button id="tab-btn-ask" class="tab-button active" type="button">Ask</button>
+            <button id="tab-btn-evidence" class="tab-button" type="button">Evidence</button>
+          </nav>
 
-          <!-- Chat Tab -->
-          <div id="tab-chat" class="tab-content active">
-            <div class="prompt-chips">
-              <div class="chips-title">Preset Operational Scenarios:</div>
-              <div class="chips-scroll">
-                <button class="chip" data-prompt="Which spots flood first if 50 mm/hr hits tonight?">
-                  50 mm/hr Hotspots
+          <!-- Ask Tab Content -->
+          <div id="tab-ask" class="tab-pane active">
+            <!-- Preset Planning Scenarios -->
+            <div class="preset-section">
+              <div class="preset-label">Suggested planning scenarios:</div>
+              <div class="preset-list">
+                <button class="preset-btn" data-prompt="Which spots flood first if 50 mm/hr hits tonight?" type="button">
+                  Which spots flood first if 50 mm/hr hits tonight?
                 </button>
-                <button class="chip" data-prompt="Is Minto Bridge at risk at 40 mm/hr?">
-                  Minto Bridge (40 mm/hr)
+                <button class="preset-btn" data-prompt="Is Minto Bridge at risk at 40 mm/hr?" type="button">
+                  Is Minto Bridge at risk at 40 mm/hr?
                 </button>
-                <button class="chip" data-prompt="I have 6 pumps, where should they go for 60 mm/hr?">
-                  6 Pumps @ 60 mm/hr
+                <button class="preset-btn" data-prompt="I have 6 pumps, where should they go for 60 mm/hr?" type="button">
+                  Place 6 pumps for 60 mm/hr scenario
                 </button>
-                <button class="chip" data-prompt="Is the route from Connaught Place to Cyber City safe right now at 40 mm/hr?">
-                  CP &rarr; Cyber City (40 mm/hr)
+                <button class="preset-btn" data-prompt="Is the route from Connaught Place to Cyber City safe right now at 40 mm/hr?" type="button">
+                  Evaluate route: Connaught Place to Cyber City (40 mm/hr)
                 </button>
               </div>
             </div>
 
-            <div id="chat-messages" class="chat-messages">
-              <div class="chat-message agent-msg">
-                <div class="msg-header">
-                  <span class="msg-sender">FloodLens Agent</span>
-                  <span class="msg-time">Ready</span>
+            <!-- Chat Conversation History -->
+            <div id="chat-messages" class="chat-feed">
+              <div class="message message-assistant">
+                <div class="message-meta">
+                  <span class="message-author">FloodLens assistant</span>
+                  <span class="message-status">Ready</span>
                 </div>
-                <div class="msg-body">
-                  Welcome to the FloodLens Delhi-NCR Drainage Control Room. You can ask for rainfall hotspot rankings, check specific corridors or underpasses, generate greedy pump deployment plans, or evaluate evacuation routes.
+                <div class="message-body">
+                  Welcome to FloodLens. You can explore waterlogging hotspots across Delhi-NCR under varying rainfall rates, assess corridor vulnerability, identify nearby underpasses, generate pump deployment recommendations, or evaluate travel route risks.
                 </div>
               </div>
             </div>
 
-            <form id="chat-form" class="chat-form">
-              <div class="chat-input-wrapper">
-                <input
-                  type="text"
-                  id="chat-input"
-                  placeholder="Ask agent (e.g. 'Place 6 pumps for 60 mm/hr')..."
-                  autocomplete="off"
-                />
-                <button type="submit" id="chat-submit" class="btn btn-primary">
-                  <span>Send</span>
-                </button>
-              </div>
+            <!-- Chat Input -->
+            <form id="chat-form" class="chat-composer">
+              <input
+                type="text"
+                id="chat-input"
+                placeholder="Ask about hotspots, pump siting, or corridors..."
+                autocomplete="off"
+              />
+              <button type="submit" id="chat-submit" class="btn-control-send">
+                Send
+              </button>
             </form>
           </div>
 
-          <!-- Evidence Tab -->
-          <div id="tab-evidence" class="tab-content">
-            <div class="evidence-container">
-              <div class="evidence-header">
-                <h3>Benchmark Evaluation & Protocol</h3>
-                <p class="evidence-notice">
-                  Fixed protocol evaluation on N=17 spots (14 corridors, 3 point sites). 95% bootstrap confidence intervals computed over 1,000 resamples. Scores frozen at <code>v1-model-frozen</code>.
+          <!-- Evidence Tab Content -->
+          <div id="tab-evidence" class="tab-pane">
+            <div class="evidence-sheet">
+              <div class="evidence-header-block">
+                <h2 class="evidence-title">Benchmark validation on 17 spots</h2>
+                <p class="evidence-context">
+                  Fixed evaluation protocol on 17 ground-truth waterlogging spots (14 corridors, 3 point sites) across two monsoon events. Scores frozen at <code>v1-model-frozen</code>.
                 </p>
               </div>
 
-              <div class="evidence-split-selector">
-                <button class="split-btn active" data-split="test">TEST Split (2026-07-28 Red Alert)</button>
-                <button class="split-btn" data-split="dev">DEV Split (2026-08-06 NCR)</button>
+              <!-- Dot-and-Whisker Plot -->
+              <div class="chart-section">
+                <div class="chart-header">
+                  <span class="chart-title">Recall at K=100 and K=200 (Test split, 95% CI)</span>
+                  <div class="segmented-control segmented-compact" id="chart-k-selector">
+                    <button class="seg-btn active" data-chartk="100" type="button">K=100</button>
+                    <button class="seg-btn" data-chartk="200" type="button">K=200</button>
+                  </div>
+                </div>
+                <div id="dot-whisker-container" class="dot-whisker-wrapper">
+                  <svg id="dot-whisker-svg" viewBox="0 0 360 210"></svg>
+                </div>
               </div>
 
-              <div id="evidence-table-wrapper" class="evidence-table-wrapper">
-                <table class="evidence-table">
-                  <thead>
-                    <tr>
-                      <th>Model / Baseline</th>
-                      <th>R@25</th>
-                      <th>R@50</th>
-                      <th>R@100</th>
-                      <th>R@200</th>
-                      <th>Ties</th>
-                    </tr>
-                  </thead>
-                  <tbody id="evidence-table-body">
-                    <tr><td colspan="6" class="text-center">Loading benchmark data...</td></tr>
-                  </tbody>
-                </table>
+              <!-- Paired Difference Summary -->
+              <div class="evidence-callout">
+                <div class="callout-heading">Comparison with underpass prior</div>
+                <p class="callout-body">
+                  FloodLens matches or exceeds the underpass-prior baseline at K=100 (difference 0.0 percentage points) and is +11.8 percentage points at K=200. The K=200 difference is not statistically distinguishable at &alpha; = 0.05, as the paired 95% bootstrap confidence interval [-5.9, +29.4] percentage points spans zero.
+                </p>
               </div>
 
-              <div id="paired-ci-container" class="paired-ci-wrapper" style="margin-top: 1rem;">
-                <h4 style="font-size: 0.85rem; font-weight: 600; color: var(--slate-200); margin-bottom: 0.5rem;">
-                  Paired Difference on Test Split: FloodLens vs Underpass Prior Only
-                </h4>
-                <table class="evidence-table" style="font-size: 0.78rem;">
-                  <thead>
-                    <tr>
-                      <th>Cutoff</th>
-                      <th>FloodLens</th>
-                      <th>Underpass Only</th>
-                      <th>Difference (FL − UP)</th>
-                      <th>95% Bootstrap CI</th>
-                      <th>Distinguishable?</th>
-                    </tr>
-                  </thead>
-                  <tbody id="paired-ci-table-body">
-                    <tr><td colspan="6" class="text-center">Loading paired bootstrap data...</td></tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div class="evidence-summary-box" style="margin-top: 1rem;">
-                <h4>Key Operational Takeaways</h4>
-                <ul id="evidence-summary-list">
-                  <li class="loading-takeaways">Loading operational takeaways from benchmark results...</li>
+              <!-- Key Takeaways List -->
+              <div class="takeaways-section">
+                <div class="takeaways-heading">Operational takeaways</div>
+                <ul id="evidence-takeaways-list" class="takeaways-list">
+                  <li>Loading evaluation metrics...</li>
                 </ul>
               </div>
+
+              <!-- Collapsible Full Numeric Table -->
+              <details class="evidence-details">
+                <summary class="details-summary">View full benchmark metrics table</summary>
+                <div class="split-controls">
+                  <button class="seg-btn active" id="btn-split-test" data-split="test" type="button">Test split (2026-07-28)</button>
+                  <button class="seg-btn" id="btn-split-dev" data-split="dev" type="button">Dev split (2026-08-06)</button>
+                </div>
+                <div class="table-scroll">
+                  <table class="survey-table">
+                    <thead>
+                      <tr>
+                        <th>Model / Baseline</th>
+                        <th>R@25</th>
+                        <th>R@50</th>
+                        <th>R@100</th>
+                        <th>R@200</th>
+                        <th>Ties</th>
+                      </tr>
+                    </thead>
+                    <tbody id="evidence-table-body">
+                      <tr><td colspan="6">Loading benchmark table...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </details>
             </div>
           </div>
         </aside>
       </main>
+
+      <!-- About this model Modal Dialog -->
+      <dialog id="about-dialog" class="survey-dialog">
+        <div class="dialog-card">
+          <div class="dialog-header">
+            <h3>About FloodLens</h3>
+            <button id="btn-dialog-close" class="btn-subtle" type="button" aria-label="Close dialog">&times;</button>
+          </div>
+          <div class="dialog-content">
+            <div class="spec-row">
+              <span class="spec-label">Spatial index</span>
+              <span class="spec-value">Uber H3 Resolution 9 (~174 m hex aperture, ~0.1 km&sup2;)</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Study coverage</span>
+              <span class="spec-value">41,703 cells covering Delhi, Gurugram, and Noida</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Terrain weights</span>
+              <span class="spec-value">HAND (25%), TWI (25%), Flow Acc (20%), Built-up (15%), Underpass (10%), Depression (5%)</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Rainfall threshold</span>
+              <span class="spec-value">R<sub>i</sub> = R<sub>ref</sub> &middot; exp(-K &middot; S<sub>i</sub>)</span>
+            </div>
+            <div class="spec-row">
+              <span class="spec-label">Evaluation protocol</span>
+              <span class="spec-value">Fixed protocol on 17 news-verified waterlogging spots (14 corridors, 3 points)</span>
+            </div>
+            <div class="dialog-disclaimer">
+              <strong>Planning disclaimer:</strong> FloodLens produces a relative susceptibility ranking designed for corridor prioritization and pump pre-positioning. It operates at approximately 1 km spatial aggregation and does not simulate dynamic hydrodynamic water depths or storm sewer pipe hydraulics.
+            </div>
+          </div>
+        </div>
+      </dialog>
     </div>
 
     <script type="module" src="./main.js"></script>

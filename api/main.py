@@ -138,6 +138,25 @@ async def hotspots_endpoint(
     return get_hotspots(mm_per_hr=mm, top_k=top, city=city)
 
 
+@app.get("/flood-curve")
+async def flood_curve_endpoint() -> dict[str, Any]:
+    """Return flooded-cell counts and shares for rainfall rates 10..100 mm/hr in steps of 5."""
+    df = get_scored_dataset()
+    total_cells: int = len(df)
+    curve_data: list[dict[str, Any]] = []
+    for m in range(10, 105, 5):
+        count: int = int((df["trigger_mm"] <= float(m)).sum())
+        pct: float = round((count / total_cells) * 100.0, 2) if total_cells > 0 else 0.0
+        curve_data.append(
+            {
+                "mm_per_hr": m,
+                "flooded_cells": count,
+                "pct": pct,
+            }
+        )
+    return {"total_cells": total_cells, "curve": curve_data}
+
+
 @app.get("/data/underpasses")
 async def underpasses_endpoint() -> dict[str, Any]:
     """Return OSM underpass priors as GeoJSON FeatureCollection."""

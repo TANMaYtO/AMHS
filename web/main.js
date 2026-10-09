@@ -16,12 +16,15 @@ const state = {
   topK: 100,
   city: 'all',
   activeSplit: 'test',
+  activeChartK: 100,
   evaluationData: null,
+  floodCurveData: null,
+  forecastPeakMm: null,
   sliderDebounceTimer: null,
   history: [],
 };
 
-// Safe elevation formatter to clamp negative zero
+// Number and elevation formatters
 function formatElevation(elev) {
   if (elev === null || elev === undefined) return '0.0 m';
   const val = Number(elev);
@@ -29,41 +32,48 @@ function formatElevation(elev) {
   return `${val.toFixed(1)} m`;
 }
 
-// ============================================================================
-// MapLibre Initialization
-// ============================================================================
-const map = new maplibregl.Map({
-  container: 'map',
-  style: {
-    version: 8,
-    sources: {
-      'dark-base': {
-        type: 'raster',
-        tiles: [
-          'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-        ],
-        tileSize: 256,
-        attribution:
-          '&copy; Esri, HERE, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors',
-      },
-    },
-    layers: [
-      {
-        id: 'dark-base-layer',
-        type: 'raster',
-        source: 'dark-base',
-        minzoom: 0,
-        maxzoom: 16,
-      },
-    ],
-  },
-  center: [77.23, 28.61], // Delhi NCR center [lng, lat]
-  zoom: 10.5,
-});
+function clampZero(val) {
+  if (Math.abs(val) < 0.0001) return 0.0;
+  return val;
+}
 
-map.addControl(new maplibregl.NavigationControl(), 'top-right');
-window.maplibregl = maplibregl;
-window.map = map;
+// ============================================================================
+// Diamond Icon Generator for Ground Truth Spots (DEV = Hollow, TEST = Solid)
+// ============================================================================
+function createDiamondIcon(isFilled) {
+  const size = 20;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.save();
+  ctx.translate(size / 2, size / 2);
+  ctx.rotate(Math.PI / 4);
+
+  const halfSide = 4.5;
+  ctx.beginPath();
+  ctx.rect(-halfSide, -halfSide, halfSide * 2, halfSide * 2);
+
+  if (isFilled) {
+    // TEST spot: solid ink diamond with subtle white outline
+    ctx.fillStyle = '#1B2A3A';
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.stroke();
+  } else {
+    // DEV spot: hollow diamond with crisp ink border
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = '#1B2A3A';
+    ctx.stroke();
+  }
+
+  ctx.restore();
+  return ctx.getImageData(0, 0, size, size);
+}
 
 // Geodesic circle generator for pump radius (1500 m)
 function createGeoJSONCircle(center, radiusInMeters, points = 48) {
@@ -90,12 +100,51 @@ function createGeoJSONCircle(center, radiusInMeters, points = 48) {
 }
 
 // ============================================================================
-// Layer Setup on Map Load
+// MapLibre Initialization: Light Gray Cartographic Basemap
+// ============================================================================
+const map = new maplibregl.Map({
+  container: 'map',
+  style: {
+    version: 8,
+    sources: {
+      'light-base': {
+        type: 'raster',
+        tiles: [
+          'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        ],
+        tileSize: 256,
+        attribution:
+          '&copy; Esri, HERE, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors',
+      },
+    },
+    layers: [
+      {
+        id: 'light-base-layer',
+        type: 'raster',
+        source: 'light-base',
+        minzoom: 0,
+        maxzoom: 16,
+      },
+    ],
+  },
+  center: [77.23, 28.61], // Delhi-NCR center [lng, lat]
+  zoom: 10.5,
+});
+
+map.addControl(new maplibregl.NavigationControl(), 'top-right');
+window.map = map;
+
+// ============================================================================
+// Map Setup on Load
 // ============================================================================
 map.on('load', async () => {
-  console.log('[Map] MapLibre initialized.');
+  console.log('[Map] Light Gray Canvas loaded.');
 
-  // 1. Flooded Hexes Sources (Polygons & Points for Regional Zoom)
+  // Add custom diamond icons
+  map.addImage('diamond-dev', createDiamondIcon(false));
+  map.addImage('diamond-test', createDiamondIcon(true));
+
+  // 1. Flooded Hexes Sources
   map.addSource('flooded-hexes', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
@@ -106,7 +155,7 @@ map.on('load', async () => {
     data: { type: 'FeatureCollection', features: [] },
   });
 
-  // Circle layer for city-wide zoom (visible at all zooms, prominent at low zoom)
+  // Centroid circles for low zoom visibility
   map.addLayer({
     id: 'flooded-hexes-points-layer',
     type: 'circle',
@@ -116,27 +165,28 @@ map.on('load', async () => {
         'interpolate',
         ['linear'],
         ['zoom'],
-        8, 3.5,
-        10, 5.5,
-        12, 7.5,
-        14, 10.0,
+        8, 3.0,
+        10, 5.0,
+        12, 7.0,
+        14, 9.5,
       ],
       'circle-color': [
         'interpolate',
         ['linear'],
         ['get', 'severity'],
-        1.0, '#38bdf8',  // Cyan (at trigger threshold)
-        1.5, '#f59e0b',  // Amber (moderate severity)
-        3.0, '#ef4444',  // Red (high severity)
-        6.0, '#b91c1c',  // Dark Red (extreme)
+        1.0, '#F6D58E', // Triggered threshold
+        1.5, '#F0A24B', // Moderate
+        2.2, '#E4572E', // Elevated
+        3.2, '#A8325A', // High
+        5.0, '#5B1A3A', // Severe
       ],
-      'circle-stroke-width': 1.0,
-      'circle-stroke-color': '#ffffff',
-      'circle-opacity': 0.85,
+      'circle-stroke-width': 0.8,
+      'circle-stroke-color': '#1B2A3A',
+      'circle-opacity': 0.88,
     },
   });
 
-  // Hex polygon fill layer
+  // Hex polygon fill layer (Warm sequential risk ramp, NO blue)
   map.addLayer({
     id: 'flooded-hexes-fill',
     type: 'fill',
@@ -146,23 +196,25 @@ map.on('load', async () => {
         'interpolate',
         ['linear'],
         ['get', 'severity'],
-        1.0, '#38bdf8',  // Cyan (at trigger threshold)
-        1.5, '#f59e0b',  // Amber (moderate severity)
-        3.0, '#ef4444',  // Red (high severity)
-        6.0, '#b91c1c',  // Dark Red (extreme)
+        1.0, '#F6D58E',
+        1.5, '#F0A24B',
+        2.2, '#E4572E',
+        3.2, '#A8325A',
+        5.0, '#5B1A3A',
       ],
-      'fill-opacity': 0.75,
+      'fill-opacity': 0.72,
     },
   });
 
+  // Hex polygon crisp boundary
   map.addLayer({
     id: 'flooded-hexes-outline',
     type: 'line',
     source: 'flooded-hexes',
     paint: {
-      'line-color': '#ffffff',
-      'line-width': 1.2,
-      'line-opacity': 0.45,
+      'line-color': '#1B2A3A',
+      'line-width': 0.8,
+      'line-opacity': 0.35,
     },
   });
 
@@ -177,48 +229,36 @@ map.on('load', async () => {
     type: 'circle',
     source: 'underpasses',
     layout: {
-      visibility: 'none', // Default OFF per operator specification
+      visibility: 'none',
     },
     paint: {
       'circle-radius': 4.5,
-      'circle-color': '#06b6d4',
+      'circle-color': '#798B99',
       'circle-stroke-width': 1.2,
-      'circle-stroke-color': '#ffffff',
+      'circle-stroke-color': '#1B2A3A',
       'circle-opacity': 0.8,
     },
   });
 
-  // 3. Ground Truth Spots Source & Layers (DEV vs TEST)
+  // 3. Ground Truth Spots Symbol Layer (Diamonds)
   map.addSource('spots', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
   });
 
   map.addLayer({
-    id: 'spots-dev-layer',
-    type: 'circle',
+    id: 'spots-layer',
+    type: 'symbol',
     source: 'spots',
-    filter: ['==', ['get', 'split'], 'dev'],
-    paint: {
-      'circle-radius': 6,
-      'circle-color': '#10b981', // Emerald green
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': '#ffffff',
-      'circle-opacity': 0.9,
-    },
-  });
-
-  map.addLayer({
-    id: 'spots-test-layer',
-    type: 'circle',
-    source: 'spots',
-    filter: ['==', ['get', 'split'], 'test'],
-    paint: {
-      'circle-radius': 6.5,
-      'circle-color': '#a855f7', // Purple/Violet
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': '#ffffff',
-      'circle-opacity': 0.9,
+    layout: {
+      'icon-image': [
+        'case',
+        ['==', ['get', 'split'], 'dev'],
+        'diamond-dev',
+        'diamond-test',
+      ],
+      'icon-size': 0.85,
+      'icon-allow-overlap': true,
     },
   });
 
@@ -233,8 +273,8 @@ map.on('load', async () => {
     type: 'fill',
     source: 'agent-pumps-radius',
     paint: {
-      'fill-color': '#38bdf8',
-      'fill-opacity': 0.18,
+      'fill-color': '#2F6F9F',
+      'fill-opacity': 0.12,
     },
   });
 
@@ -243,9 +283,9 @@ map.on('load', async () => {
     type: 'line',
     source: 'agent-pumps-radius',
     paint: {
-      'line-color': '#38bdf8',
-      'line-width': 2,
-      'line-dasharray': [3, 2],
+      'line-color': '#2F6F9F',
+      'line-width': 1.5,
+      'line-dasharray': [4, 3],
     },
   });
 
@@ -259,10 +299,10 @@ map.on('load', async () => {
     type: 'circle',
     source: 'agent-pumps-points',
     paint: {
-      'circle-radius': 8,
-      'circle-color': '#0284c7',
-      'circle-stroke-width': 2,
-      'circle-stroke-color': '#ffffff',
+      'circle-radius': 6.5,
+      'circle-color': '#2F6F9F',
+      'circle-stroke-width': 1.5,
+      'circle-stroke-color': '#FFFFFF',
     },
   });
 
@@ -277,9 +317,9 @@ map.on('load', async () => {
     type: 'line',
     source: 'agent-route',
     paint: {
-      'line-color': '#f59e0b',
-      'line-width': 4.5,
-      'line-opacity': 0.9,
+      'line-color': '#C84B31',
+      'line-width': 3.5,
+      'line-opacity': 0.85,
     },
   });
 
@@ -293,27 +333,29 @@ map.on('load', async () => {
     type: 'circle',
     source: 'agent-route-risk-points',
     paint: {
-      'circle-radius': 7,
-      'circle-color': '#ef4444',
-      'circle-stroke-width': 2,
-      'circle-stroke-color': '#ffffff',
+      'circle-radius': 5.5,
+      'circle-color': '#5B1A3A',
+      'circle-stroke-width': 1.5,
+      'circle-stroke-color': '#FFFFFF',
     },
   });
 
   // Attach Click Handlers for Popups
   attachMapPopupHandlers();
 
-  // Load Initial Datasets
+  // Load Datasets in Parallel
   await Promise.all([
     loadFloodedHexes(),
     loadUnderpasses(),
     loadSpots(),
+    loadFloodCurve(),
     loadEvidenceData(),
+    fetchForecastInfo(),
   ]);
 });
 
 // ============================================================================
-// Popup Handling
+// Map Popups
 // ============================================================================
 function attachMapPopupHandlers() {
   const showHexPopup = (e) => {
@@ -332,7 +374,7 @@ function attachMapPopupHandlers() {
       </div>
       <div class="popup-row">
         <span class="popup-label">Severity:</span>
-        <span class="popup-value">${Number(props.severity).toFixed(2)}x trigger</span>
+        <span class="popup-value">${Number(props.severity).toFixed(2)}&times; trigger</span>
       </div>
       <div class="popup-row">
         <span class="popup-label">Trigger Rate:</span>
@@ -357,11 +399,9 @@ function attachMapPopupHandlers() {
       .addTo(map);
   };
 
-  // Hex Polygon & Circle Point Clicks
   map.on('click', 'flooded-hexes-fill', showHexPopup);
   map.on('click', 'flooded-hexes-points-layer', showHexPopup);
 
-  // Underpasses Click
   map.on('click', 'underpasses-layer', (e) => {
     if (!e.features || !e.features[0]) return;
     const props = e.features[0].properties;
@@ -375,52 +415,42 @@ function attachMapPopupHandlers() {
       .addTo(map);
   });
 
-  // Ground Truth Spots Click
-  const handleSpotClick = (e) => {
+  map.on('click', 'spots-layer', (e) => {
     if (!e.features || !e.features[0]) return;
     const props = e.features[0].properties;
+    const splitLabel = props.split === 'test' ? 'Test Split (2026-07-28)' : 'Dev Split (2026-08-06)';
     new maplibregl.Popup({ closeButton: true })
       .setLngLat(e.lngLat)
       .setHTML(`
-        <div class="popup-title">Ground Truth Spot (${props.split.toUpperCase()})</div>
+        <div class="popup-title">Ground Truth Spot (${splitLabel})</div>
         <div class="popup-row"><span class="popup-label">Location:</span> <span class="popup-value">${props.name}</span></div>
         <div class="popup-row"><span class="popup-label">Event Date:</span> <span class="popup-value">${props.event_date}</span></div>
         <div class="popup-row"><span class="popup-label">Geometry:</span> <span class="popup-value">${props.geom_type}</span></div>
         <div class="popup-row"><span class="popup-label">Confidence:</span> <span class="popup-value">${props.confidence}</span></div>
       `)
       .addTo(map);
-  };
-
-  map.on('click', 'spots-dev-layer', handleSpotClick);
-  map.on('click', 'spots-test-layer', handleSpotClick);
+  });
 
   // Pointer cursor styling
-  ['flooded-hexes-fill', 'flooded-hexes-points-layer', 'underpasses-layer', 'spots-dev-layer', 'spots-test-layer'].forEach((layerId) => {
+  ['flooded-hexes-fill', 'flooded-hexes-points-layer', 'underpasses-layer', 'spots-layer'].forEach((layerId) => {
     map.on('mouseenter', layerId, () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', layerId, () => (map.getCanvas().style.cursor = ''));
   });
 }
 
 // ============================================================================
-// Data Fetching & Layer Updates
+// Data Loading
 // ============================================================================
 async function loadFloodedHexes() {
-  const overlay = document.getElementById('map-status-text');
-  if (overlay) overlay.textContent = `Fetching hotspots (${state.rainfallMm} mm/hr)...`;
-
   try {
     const url = `/hotspots?mm=${state.rainfallMm}&top=${state.topK}&city=${state.city}`;
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
 
-    // 1. Update polygon hex source
     const src = map.getSource('flooded-hexes');
-    if (src) {
-      src.setData(data);
-    }
+    if (src) src.setData(data);
 
-    // 2. Update centroid circle point source for low zoom visibility
     const ptSrc = map.getSource('flooded-hexes-points');
     if (ptSrc && data.features) {
       const pointFeatures = data.features.map((f) => ({
@@ -435,38 +465,11 @@ async function loadFloodedHexes() {
       ptSrc.setData({ type: 'FeatureCollection', features: pointFeatures });
     }
 
-    // 3. Update live count indicator
+    // Update bottom readout count if curve hasn't done so
     const totalCount = data.metadata ? data.metadata.total_flooded_hexes : 0;
-    const countEl = document.getElementById('flooded-count-val');
-    const pctEl = document.getElementById('flooded-pct-val');
-
-    if (countEl) countEl.textContent = totalCount.toLocaleString();
-    if (pctEl) {
-      const pct = ((totalCount / 41703) * 100).toFixed(1);
-      pctEl.textContent = `${pct}%`;
-    }
-
-    if (overlay) {
-      overlay.textContent = `Showing top ${data.features.length} of ${totalCount.toLocaleString()} flooded (${state.city.toUpperCase()})`;
-    }
-
-    // 4. Fit map to flooded hexes on load and when slider changes
-    if (data.features && data.features.length > 0) {
-      const bounds = new maplibregl.LngLatBounds();
-      data.features.forEach((f) => {
-        if (f.geometry && f.geometry.coordinates && f.geometry.coordinates[0]) {
-          f.geometry.coordinates[0].forEach((pt) => bounds.extend(pt));
-        } else if (f.properties && f.properties.lon && f.properties.lat) {
-          bounds.extend([f.properties.lon, f.properties.lat]);
-        }
-      });
-      if (!bounds.isEmpty()) {
-        map.fitBounds(bounds, { padding: 50, maxZoom: 13, duration: 600 });
-      }
-    }
+    updateBottomBarReadout(state.rainfallMm, totalCount);
   } catch (err) {
     console.error('[Hotspots Error]', err);
-    if (overlay) overlay.textContent = 'Error loading hotspots';
   }
 }
 
@@ -500,25 +503,219 @@ async function loadSpots() {
   }
 }
 
-async function loadEvidenceData() {
+async function fetchForecastInfo() {
   try {
-    const resp = await fetch('/eval/results');
+    const resp = await fetch('/forecast?location=Delhi');
     if (!resp.ok) return;
-    state.evaluationData = await resp.json();
-    renderAllEvidence();
+    const data = await resp.json();
+    if (data.peak_hourly_mm !== undefined) {
+      state.forecastPeakMm = Math.max(10, Math.min(100, Math.round(data.peak_hourly_mm)));
+      const btn = document.getElementById('btn-use-forecast');
+      if (btn) {
+        btn.textContent = `Use forecast peak (${state.forecastPeakMm} mm/hr)`;
+      }
+    }
   } catch (err) {
-    console.warn('[Evidence Error]', err);
+    console.warn('[Forecast Error]', err);
   }
 }
 
 // ============================================================================
-// Agent Chat & Tool Overlays
+// Flood Curve Endpoint & Interactive SVG Scrubber
+// ============================================================================
+async function loadFloodCurve() {
+  try {
+    const resp = await fetch('/flood-curve');
+    if (!resp.ok) return;
+    state.floodCurveData = await resp.json();
+    renderFloodCurveSvg();
+  } catch (err) {
+    console.warn('[Flood Curve Error]', err);
+  }
+}
+
+function updateBottomBarReadout(mm, cellsCount = null) {
+  const mmDisplay = document.getElementById('curve-mm-display');
+  const cellsDisplay = document.getElementById('curve-cells-count');
+  const pctDisplay = document.getElementById('curve-pct-display');
+
+  if (mmDisplay) mmDisplay.textContent = `${mm} mm/hr`;
+
+  let count = cellsCount;
+  if (count === null && state.floodCurveData && state.floodCurveData.curve) {
+    const pt = state.floodCurveData.curve.find((c) => c.mm_per_hr === mm);
+    if (pt) count = pt.flooded_cells;
+  }
+
+  if (count !== null) {
+    if (cellsDisplay) cellsDisplay.textContent = count.toLocaleString();
+    if (pctDisplay) {
+      const pct = ((count / 41703) * 100).toFixed(1);
+      pctDisplay.textContent = `${pct}%`;
+    }
+  }
+
+  const wrapper = document.getElementById('curve-chart-wrapper');
+  if (wrapper) wrapper.setAttribute('aria-valuenow', mm);
+}
+
+function renderFloodCurveSvg() {
+  const svg = document.getElementById('flood-curve-svg');
+  if (!svg || !state.floodCurveData || !state.floodCurveData.curve) return;
+
+  const points = state.floodCurveData.curve;
+  const width = 480;
+  const height = 66;
+  const padLeft = 20;
+  const padRight = 32;
+  const padTop = 10;
+  const padBottom = 20;
+
+  const maxCells = points.reduce((m, p) => Math.max(m, p.flooded_cells), 1);
+  const minMm = 10;
+  const maxMm = 100;
+
+  const getX = (mm) => padLeft + ((mm - minMm) / (maxMm - minMm)) * (width - padLeft - padRight);
+  const getY = (cells) => height - padBottom - (cells / maxCells) * (height - padTop - padBottom);
+
+  // Build SVG path
+  let pathD = '';
+  points.forEach((p, i) => {
+    const x = getX(p.mm_per_hr);
+    const y = getY(p.flooded_cells);
+    pathD += `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)} `;
+  });
+
+  const lastX = getX(maxMm);
+  const firstX = getX(minMm);
+  const baselineY = height - padBottom;
+  const areaD = `${pathD} L ${lastX.toFixed(1)} ${baselineY} L ${firstX.toFixed(1)} ${baselineY} Z`;
+
+  // Current position
+  const currX = getX(state.rainfallMm);
+  const currPt = points.find((p) => p.mm_per_hr === state.rainfallMm) || points[0];
+  const currY = getY(currPt.flooded_cells);
+
+  // SVG Markup
+  svg.innerHTML = `
+    <!-- Baseline Grid Line -->
+    <line x1="${padLeft}" y1="${baselineY}" x2="${width - padRight}" y2="${baselineY}" stroke="#C9D1D6" stroke-width="1" />
+    
+    <!-- Area Under Curve -->
+    <path d="${areaD}" fill="rgba(228, 87, 46, 0.12)" />
+
+    <!-- Curve Stroke -->
+    <path d="${pathD}" fill="none" stroke="#E4572E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+
+    <!-- Ticks & Labels along bottom -->
+    <g font-size="9" fill="#798B99" font-family="inherit" text-anchor="middle">
+      <text x="${getX(10)}" y="${height - 4}">10</text>
+      <text x="${getX(25)}" y="${height - 4}">25</text>
+      <text x="${getX(40)}" y="${height - 4}">40</text>
+      <text x="${getX(60)}" y="${height - 4}">60</text>
+      <text x="${getX(80)}" y="${height - 4}">80</text>
+      <text x="${getX(100)}" y="${height - 4}">100 mm/hr</text>
+    </g>
+
+    <!-- Vertical Hairline at Active Scenario -->
+    <line id="curve-hairline" x1="${currX.toFixed(1)}" y1="${padTop}" x2="${currX.toFixed(1)}" y2="${baselineY}" stroke="#1B2A3A" stroke-width="1.5" />
+
+    <!-- Circular Handle at Active Scenario -->
+    <circle id="curve-handle" cx="${currX.toFixed(1)}" cy="${currY.toFixed(1)}" r="5.5" fill="#FFFFFF" stroke="#1B2A3A" stroke-width="2" />
+  `;
+
+  updateBottomBarReadout(state.rainfallMm);
+}
+
+function updateScrubberToMm(newMm) {
+  const clampedMm = Math.max(10, Math.min(100, Math.round(newMm / 5) * 5));
+  if (clampedMm === state.rainfallMm) return;
+
+  state.rainfallMm = clampedMm;
+  renderFloodCurveSvg();
+
+  clearTimeout(state.sliderDebounceTimer);
+  state.sliderDebounceTimer = setTimeout(() => {
+    loadFloodedHexes();
+  }, 160);
+}
+
+function setupCurveScrubberInteractions() {
+  const wrapper = document.getElementById('curve-chart-wrapper');
+  if (!wrapper) return;
+
+  let isDragging = false;
+
+  const handlePointer = (clientX) => {
+    const rect = wrapper.getBoundingClientRect();
+    const padLeft = 20 * (rect.width / 480);
+    const padRight = 32 * (rect.width / 480);
+    const usableWidth = rect.width - padLeft - padRight;
+    const relX = Math.max(0, Math.min(usableWidth, clientX - rect.left - padLeft));
+    const fraction = relX / usableWidth;
+    const mm = 10 + fraction * 90;
+    updateScrubberToMm(mm);
+  };
+
+  wrapper.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    handlePointer(e.clientX);
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (isDragging) handlePointer(e.clientX);
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+
+  // Touch support
+  wrapper.addEventListener('touchstart', (e) => {
+    if (e.touches && e.touches[0]) {
+      isDragging = true;
+      handlePointer(e.touches[0].clientX);
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchmove', (e) => {
+    if (isDragging && e.touches && e.touches[0]) {
+      handlePointer(e.touches[0].clientX);
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchend', () => {
+    isDragging = false;
+  });
+
+  // Keyboard accessibility
+  wrapper.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      updateScrubberToMm(state.rainfallMm - 5);
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      updateScrubberToMm(state.rainfallMm + 5);
+    }
+  });
+
+  // Forecast button
+  const btnForecast = document.getElementById('btn-use-forecast');
+  if (btnForecast) {
+    btnForecast.addEventListener('click', () => {
+      const target = state.forecastPeakMm || 40;
+      updateScrubberToMm(target);
+    });
+  }
+}
+
+// ============================================================================
+// Agent Chat, Overlays, and Tool Steps Formatting
 // ============================================================================
 function updateAgentOverlays(traces) {
   let hasOverlays = false;
   const bounds = new maplibregl.LngLatBounds();
 
-  // Reset agent overlay sources
   const pumpRadiusSrc = map.getSource('agent-pumps-radius');
   const pumpPointsSrc = map.getSource('agent-pumps-points');
   const routeSrc = map.getSource('agent-route');
@@ -553,12 +750,8 @@ function updateAgentOverlays(traces) {
         hasOverlays = true;
       });
 
-      if (pumpRadiusSrc) {
-        pumpRadiusSrc.setData({ type: 'FeatureCollection', features: radiusFeatures });
-      }
-      if (pumpPointsSrc) {
-        pumpPointsSrc.setData({ type: 'FeatureCollection', features: pointFeatures });
-      }
+      if (pumpRadiusSrc) pumpRadiusSrc.setData({ type: 'FeatureCollection', features: radiusFeatures });
+      if (pumpPointsSrc) pumpPointsSrc.setData({ type: 'FeatureCollection', features: pointFeatures });
     }
 
     // 2. Route Corridor Overlays
@@ -571,31 +764,87 @@ function updateAgentOverlays(traces) {
         },
         properties: {},
       };
-      if (routeSrc) {
-        routeSrc.setData({ type: 'FeatureCollection', features: [lineFeat] });
-      }
+      if (routeSrc) routeSrc.setData({ type: 'FeatureCollection', features: [lineFeat] });
 
       payload.route_coordinates.forEach((c) => bounds.extend(c));
       hasOverlays = true;
 
-      // Risk hexes on route
       if (payload.top_risk_hexes && Array.isArray(payload.top_risk_hexes)) {
         const riskPoints = payload.top_risk_hexes.map((h) => ({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [h.lon, h.lat] },
           properties: h,
         }));
-        if (routeRiskSrc) {
-          routeRiskSrc.setData({ type: 'FeatureCollection', features: riskPoints });
-        }
+        if (routeRiskSrc) routeRiskSrc.setData({ type: 'FeatureCollection', features: riskPoints });
       }
     }
   }
 
-  // Zoom map to cover overlays if present
   if (hasOverlays && !bounds.isEmpty()) {
-    map.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 1200 });
+    map.fitBounds(bounds, { padding: 60, maxZoom: 13, duration: 1000 });
   }
+}
+
+// Enhance markdown table rows with coordinate click handlers to flyTo
+function enhanceAgentMessageDom(containerEl, traces) {
+  // 1. Attach click handlers to any table row that contains coordinates or pump sites
+  const tables = containerEl.querySelectorAll('table');
+  tables.forEach((tbl) => {
+    tbl.classList.add('agent-interactive-table');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'agent-table-wrapper';
+    tbl.parentNode.insertBefore(wrapper, tbl);
+    wrapper.appendChild(tbl);
+
+    const rows = tbl.querySelectorAll('tbody tr');
+    rows.forEach((row, idx) => {
+      // Look for coordinates in cells
+      const text = row.innerText;
+      const coordMatch = text.match(/([2-3][0-9]\.[0-9]{2,6})[^\d]+(7[6-8]\.[0-9]{2,6})/);
+
+      let lat = null;
+      let lon = null;
+      if (coordMatch) {
+        lat = parseFloat(coordMatch[1]);
+        lon = parseFloat(coordMatch[2]);
+      } else {
+        // Fallback: check if we have traces with pumps matching row index
+        for (const t of traces) {
+          if (t.data && t.data.pumps && t.data.pumps[idx]) {
+            lat = t.data.pumps[idx].lat;
+            lon = t.data.pumps[idx].lon;
+            break;
+          }
+        }
+      }
+
+      if (lat && lon) {
+        row.classList.add('clickable-row');
+        row.title = 'Click to focus this site on the map';
+        row.addEventListener('click', () => {
+          map.flyTo({ center: [lon, lat], zoom: 14, duration: 900 });
+        });
+      }
+    });
+  });
+
+  // 2. Wrap any lengthy hex ID blocks in <details class="hex-fold">
+  const paragraphs = containerEl.querySelectorAll('p, li');
+  paragraphs.forEach((p) => {
+    const text = p.innerText;
+    // Check if paragraph contains 15-char H3 hex IDs (e.g. 89608...)
+    const hexMatches = text.match(/\b8960[0-9a-f]{11}\b/gi);
+    if (hexMatches && hexMatches.length > 2) {
+      const summaryText = `Show ${hexMatches.length} H3 cell IDs`;
+      const details = document.createElement('details');
+      details.className = 'hex-fold';
+      details.innerHTML = `
+        <summary>${summaryText}</summary>
+        <div class="hex-fold-body">${p.innerHTML}</div>
+      `;
+      p.parentNode.replaceChild(details, p);
+    }
+  });
 }
 
 async function handleSendMessage(promptText) {
@@ -607,26 +856,26 @@ async function handleSendMessage(promptText) {
 
   // Append user message
   const userMsgEl = document.createElement('div');
-  userMsgEl.className = 'chat-message user-msg';
+  userMsgEl.className = 'message message-user';
   userMsgEl.innerHTML = `
-    <div class="msg-header">
-      <span class="msg-sender">Operator</span>
-      <span class="msg-time">${new Date().toLocaleTimeString()}</span>
+    <div class="message-meta">
+      <span class="message-author">Operator</span>
+      <span class="message-status">${new Date().toLocaleTimeString()}</span>
     </div>
-    <div class="msg-body">${promptText}</div>
+    <div class="message-body">${promptText}</div>
   `;
   chatContainer.appendChild(userMsgEl);
 
-  // Append agent thinking placeholder
+  // Append assistant loading placeholder
   const agentMsgEl = document.createElement('div');
-  agentMsgEl.className = 'chat-message agent-msg';
+  agentMsgEl.className = 'message message-assistant';
   agentMsgEl.innerHTML = `
-    <div class="msg-header">
-      <span class="msg-sender">FloodLens Agent</span>
-      <span class="msg-time">Analyzing hydrology...</span>
+    <div class="message-meta">
+      <span class="message-author">FloodLens assistant</span>
+      <span class="message-status">Analyzing hydrological features...</span>
     </div>
-    <div class="msg-body">
-      <em style="color: var(--cyan);">Querying spatial models and terrain tensors...</em>
+    <div class="message-body">
+      <em>Evaluating spatial models and terrain tensors...</em>
     </div>
   `;
   chatContainer.appendChild(agentMsgEl);
@@ -645,31 +894,34 @@ async function handleSendMessage(promptText) {
     // Render markdown response
     const renderedBody = marked.parse(data.reply || 'No response returned.');
 
-    // Build tool trace pills
-    let tracesHtml = '';
+    // Format tool execution trace as a clean numbered step list
+    let stepsHtml = '';
     if (data.tool_trace && data.tool_trace.length > 0) {
-      tracesHtml = `<div class="tool-traces-container">`;
-      data.tool_trace.forEach((trace) => {
-        tracesHtml += `
-          <div class="trace-pill" title="Click to view tool data on map">
-            <span class="trace-icon">&#9658;</span>
-            <strong>${trace.tool}</strong>: ${trace.summary}
-          </div>
-        `;
-      });
-      tracesHtml += `</div>`;
+      stepsHtml = `
+        <div class="tool-steps-card">
+          <div class="tool-steps-title">Analytical steps executed:</div>
+          <ol class="tool-steps-ol">
+            ${data.tool_trace.map((t) => `<li>${t.summary || t.tool}</li>`).join('')}
+          </ol>
+        </div>
+      `;
     }
 
     agentMsgEl.innerHTML = `
-      <div class="msg-header">
-        <span class="msg-sender">FloodLens Agent</span>
-        <span class="msg-time">${new Date().toLocaleTimeString()}</span>
+      <div class="message-meta">
+        <span class="message-author">FloodLens assistant</span>
+        <span class="message-status">${new Date().toLocaleTimeString()}</span>
       </div>
-      <div class="msg-body">${renderedBody}</div>
-      ${tracesHtml}
+      <div class="message-body">
+        ${renderedBody}
+        ${stepsHtml}
+      </div>
     `;
 
-    // Update agent map overlays (pumps, routes, etc.)
+    // Enhance table rows with click-to-flyTo and fold raw hex strings
+    enhanceAgentMessageDom(agentMsgEl.querySelector('.message-body'), data.tool_trace || []);
+
+    // Update map overlays (pumps, routes, risk spots)
     if (data.tool_trace && data.tool_trace.length > 0) {
       updateAgentOverlays(data.tool_trace);
     }
@@ -680,12 +932,12 @@ async function handleSendMessage(promptText) {
   } catch (err) {
     console.error('[Chat Error]', err);
     agentMsgEl.innerHTML = `
-      <div class="msg-header">
-        <span class="msg-sender">FloodLens Agent</span>
-        <span class="msg-time">Error</span>
+      <div class="message-meta">
+        <span class="message-author">FloodLens assistant</span>
+        <span class="message-status">Error</span>
       </div>
-      <div class="msg-body" style="color: var(--red);">
-        Failed to process control room query: ${err.message}
+      <div class="message-body" style="color: #A8325A;">
+        Failed to process query: ${err.message}
       </div>
     `;
   }
@@ -694,12 +946,119 @@ async function handleSendMessage(promptText) {
 }
 
 // ============================================================================
-// Evidence Tab Rendering
+// Evidence Tab: Dot-and-Whisker Plot & Benchmark Metrics
 // ============================================================================
-function renderAllEvidence() {
-  renderEvidenceTable();
-  renderPairedCiTable();
-  renderEvidenceTakeaways();
+async function loadEvidenceData() {
+  try {
+    const resp = await fetch('/eval/results');
+    if (!resp.ok) return;
+    state.evaluationData = await resp.json();
+    renderDotWhiskerPlot();
+    renderEvidenceTakeaways();
+    renderEvidenceTable();
+  } catch (err) {
+    console.warn('[Evidence Error]', err);
+  }
+}
+
+function renderDotWhiskerPlot() {
+  const svg = document.getElementById('dot-whisker-svg');
+  if (!svg || !state.evaluationData || !state.evaluationData.splits) return;
+
+  const splitData = state.evaluationData.splits.test;
+  if (!splitData) return;
+
+  const kStr = String(state.activeChartK);
+  const models = [
+    { name: 'FloodLens', key: 'FloodLens (Composite)', isTarget: true },
+    { name: 'Underpass prior only', key: 'Underpass Prior Only' },
+    { name: 'Flow accumulation only', key: 'Flow Acc Only' },
+    { name: 'HAND only', key: 'HAND Only' },
+    { name: 'TWI only', key: 'TWI Only' },
+    { name: 'Elevation only', key: 'Elevation Only' },
+  ];
+
+  const width = 360;
+  const height = 210;
+  const padLeft = 140;
+  const padRight = 24;
+  const padTop = 18;
+  const padBottom = 28;
+
+  const usableWidth = width - padLeft - padRight;
+  const getX = (val) => padLeft + Math.max(0, Math.min(1, val)) * usableWidth;
+
+  const rowCount = models.length;
+  const rowHeight = (height - padTop - padBottom) / rowCount;
+
+  let contentHtml = `
+    <!-- Axis lines & grid -->
+    <line x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}" stroke="#C9D1D6" stroke-width="1" />
+  `;
+
+  // Grid ticks (0%, 25%, 50%, 75%, 100%)
+  [0, 0.25, 0.5, 0.75, 1.0].forEach((tick) => {
+    const tx = getX(tick);
+    contentHtml += `
+      <line x1="${tx}" y1="${padTop}" x2="${tx}" y2="${height - padBottom}" stroke="#DEE3E6" stroke-width="1" stroke-dasharray="2,2" />
+      <text x="${tx}" y="${height - 12}" font-size="9" fill="#798B99" font-family="inherit" text-anchor="middle">${(tick * 100).toFixed(0)}%</text>
+    `;
+  });
+
+  // Draw each model row
+  models.forEach((m, idx) => {
+    const data = splitData[m.key];
+    if (!data) return;
+
+    const y = padTop + idx * rowHeight + rowHeight / 2;
+    const metrics = data.metrics ? data.metrics[kStr] : null;
+    const cis = data.cis ? data.cis[kStr] : null;
+
+    const recall = metrics ? (metrics.comb_300 !== undefined ? metrics.comb_300 : metrics.rec_str_1000) : 0;
+    const ciPair = cis && cis.comb_300 ? cis.comb_300 : [recall, recall];
+
+    const lowX = getX(ciPair[0]);
+    const highX = getX(ciPair[1]);
+    const dotX = getX(recall);
+
+    const isFl = m.isTarget;
+    const inkColor = isFl ? '#2F6F9F' : '#1B2A3A';
+    const whiskerColor = isFl ? '#2F6F9F' : '#798B99';
+
+    // Label
+    contentHtml += `
+      <text x="${padLeft - 8}" y="${y + 3}" font-size="10" font-weight="${isFl ? '700' : '500'}" fill="${isFl ? '#2F6F9F' : '#1B2A3A'}" font-family="inherit" text-anchor="end">${m.name}</text>
+    `;
+
+    // Whisker line
+    contentHtml += `
+      <line x1="${lowX.toFixed(1)}" y1="${y}" x2="${highX.toFixed(1)}" y2="${y}" stroke="${whiskerColor}" stroke-width="${isFl ? '2' : '1.2'}" />
+      <line x1="${lowX.toFixed(1)}" y1="${y - 3}" x2="${lowX.toFixed(1)}" y2="${y + 3}" stroke="${whiskerColor}" stroke-width="${isFl ? '2' : '1.2'}" />
+      <line x1="${highX.toFixed(1)}" y1="${y - 3}" x2="${highX.toFixed(1)}" y2="${y + 3}" stroke="${whiskerColor}" stroke-width="${isFl ? '2' : '1.2'}" />
+    `;
+
+    // Dot
+    contentHtml += `
+      <circle cx="${dotX.toFixed(1)}" cy="${y}" r="${isFl ? '4.5' : '3.5'}" fill="${inkColor}" stroke="#FFFFFF" stroke-width="1.2" />
+    `;
+  });
+
+  svg.innerHTML = contentHtml;
+}
+
+function renderEvidenceTakeaways() {
+  const summaryList = document.getElementById('evidence-takeaways-list');
+  if (!summaryList || !state.evaluationData) return;
+
+  summaryList.innerHTML = '';
+  const items = state.evaluationData.summary || [];
+  if (items.length > 0) {
+    items.forEach((txt) => {
+      const li = document.createElement('li');
+      li.textContent = txt;
+      summaryList.appendChild(li);
+    });
+  }
 }
 
 function renderEvidenceTable() {
@@ -711,10 +1070,10 @@ function renderEvidenceTable() {
 
   const modelsOrder = [
     'FloodLens (Composite)',
-    'TWI Only',
     'Underpass Prior Only',
     'Flow Acc Only',
     'HAND Only',
+    'TWI Only',
     'Built-up Only',
     'Elevation Only',
     'Random Uniform (full 41,703 pool)',
@@ -731,12 +1090,13 @@ function renderEvidenceTable() {
     const isFl = modelName.includes('FloodLens');
 
     const tr = document.createElement('tr');
-    if (isFl) tr.className = 'highlight-row';
+    if (isFl) tr.className = 'highlight-model';
 
     const getRec = (k) => {
       if (!metrics || !metrics[k]) return '--';
       const val = metrics[k].comb_300 !== undefined ? metrics[k].comb_300 : metrics[k].rec_str_1000;
-      return `${(val * 100).toFixed(1)}%`;
+      const cleanVal = clampZero(val);
+      return `${(cleanVal * 100).toFixed(1)}%`;
     };
 
     const tieStr = ties[100] !== undefined ? `${ties[100].toLocaleString()}` : '--';
@@ -753,129 +1113,33 @@ function renderEvidenceTable() {
   });
 }
 
-function renderPairedCiTable() {
-  const container = document.getElementById('paired-ci-container');
-  const tbody = document.getElementById('paired-ci-table-body');
-  if (!container || !tbody) return;
-
-  if (state.activeSplit !== 'test' || !state.evaluationData || !state.evaluationData.paired_bootstrap_cis) {
-    container.style.display = 'none';
-    return;
-  }
-
-  container.style.display = 'block';
-  tbody.innerHTML = '';
-
-  const pairedData = state.evaluationData.paired_bootstrap_cis;
-  [25, 50, 100, 200].forEach((k) => {
-    const p = pairedData[k];
-    if (!p) return;
-
-    const tr = document.createElement('tr');
-    const diffPct = (p.diff * 100).toFixed(1);
-    const ciLow = (p.ci_95[0] * 100).toFixed(1);
-    const ciHigh = (p.ci_95[1] * 100).toFixed(1);
-    const isDist = p.distinguishable;
-
-    tr.innerHTML = `
-      <td><strong>K = ${k}</strong></td>
-      <td>${(p.fl_recall * 100).toFixed(1)}%</td>
-      <td>${(p.up_recall * 100).toFixed(1)}%</td>
-      <td style="color: ${p.diff > 0 ? 'var(--cyan)' : 'var(--amber)'}; font-weight: 600;">
-        ${p.diff > 0 ? '+' : ''}${diffPct}%
-      </td>
-      <td>[${ciLow}%, ${ciHigh}%]</td>
-      <td><span class="badge ${isDist ? 'badge-accent' : ''}">${isDist ? 'Yes' : 'No (CI spans 0)'}</span></td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-function renderEvidenceTakeaways() {
-  const summaryList = document.getElementById('evidence-summary-list');
-  if (!summaryList || !state.evaluationData) return;
-
-  summaryList.innerHTML = '';
-
-  const items = state.evaluationData.summary || [];
-  if (items.length > 0) {
-    items.forEach((txt) => {
-      const li = document.createElement('li');
-      li.textContent = txt;
-      summaryList.appendChild(li);
-    });
-  }
-}
-
 // ============================================================================
-// UI Event Handlers
+// Event Listeners & Wireup
 // ============================================================================
 function setupEventListeners() {
-  // 1. Rainfall Slider Input
-  const slider = document.getElementById('rainfall-slider');
-  const valDisplay = document.getElementById('rainfall-val');
-
-  if (slider && valDisplay) {
-    slider.addEventListener('input', (e) => {
-      const val = parseFloat(e.target.value);
-      state.rainfallMm = val;
-      valDisplay.textContent = val;
-
-      clearTimeout(state.sliderDebounceTimer);
-      state.sliderDebounceTimer = setTimeout(() => {
-        loadFloodedHexes();
-      }, 200);
-    });
-  }
-
-  // 2. Forecast Peak Button
-  const btnForecast = document.getElementById('btn-forecast');
-  if (btnForecast) {
-    btnForecast.addEventListener('click', async () => {
-      btnForecast.disabled = true;
-      btnForecast.innerHTML = 'Fetching forecast...';
-      try {
-        const resp = await fetch('/forecast?location=Delhi');
-        if (resp.ok) {
-          const data = await resp.json();
-          const peak = Math.max(10, Math.min(100, Math.round(data.peak_hourly_mm || 40)));
-          state.rainfallMm = peak;
-          if (slider) slider.value = peak;
-          if (valDisplay) valDisplay.textContent = peak;
-          loadFloodedHexes();
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        btnForecast.disabled = false;
-        btnForecast.innerHTML = '<span class="btn-icon">&#9729;</span> Use Forecast Peak (Delhi)';
-      }
-    });
-  }
-
-  // 3. Top-N Selector Pills
-  const topPills = document.querySelectorAll('#top-pills .pill');
-  topPills.forEach((btn) => {
+  // 1. City Jurisdiction Filter
+  const cityBtns = document.querySelectorAll('#city-selector .seg-btn');
+  cityBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
-      topPills.forEach((p) => p.classList.remove('active'));
-      btn.classList.add('active');
-      state.topK = parseInt(btn.dataset.top, 10);
-      loadFloodedHexes();
-    });
-  });
-
-  // 4. City Selector Pills
-  const cityPills = document.querySelectorAll('#city-pills .pill');
-  cityPills.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      cityPills.forEach((p) => p.classList.remove('active'));
+      cityBtns.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       state.city = btn.dataset.city;
       loadFloodedHexes();
     });
   });
 
-  // 5. Layer Toggle Checkboxes
+  // 2. Top-N Selector
+  const topBtns = document.querySelectorAll('#top-selector .seg-btn');
+  topBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      topBtns.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.topK = parseInt(btn.dataset.top, 10);
+      loadFloodedHexes();
+    });
+  });
+
+  // 3. Layer Toggles
   const toggleMapLayer = (checkboxId, layerIds) => {
     const cb = document.getElementById(checkboxId);
     if (!cb) return;
@@ -889,9 +1153,9 @@ function setupEventListeners() {
     });
   };
 
-  toggleMapLayer('layer-hexes', ['flooded-hexes-fill', 'flooded-hexes-outline']);
+  toggleMapLayer('layer-hexes', ['flooded-hexes-fill', 'flooded-hexes-outline', 'flooded-hexes-points-layer']);
   toggleMapLayer('layer-underpasses', ['underpasses-layer']);
-  toggleMapLayer('layer-spots', ['spots-dev-layer', 'spots-test-layer']);
+  toggleMapLayer('layer-spots', ['spots-layer']);
   toggleMapLayer('layer-overlays', [
     'agent-pumps-radius-fill',
     'agent-pumps-radius-line',
@@ -900,50 +1164,68 @@ function setupEventListeners() {
     'agent-route-risk-layer',
   ]);
 
-  // 6. Right Panel Tab Switcher
-  const btnChat = document.getElementById('tab-btn-chat');
+  // 4. Panel Tabs (Ask / Evidence)
+  const btnAsk = document.getElementById('tab-btn-ask');
   const btnEvidence = document.getElementById('tab-btn-evidence');
-  const tabChat = document.getElementById('tab-chat');
+  const tabAsk = document.getElementById('tab-ask');
   const tabEvidence = document.getElementById('tab-evidence');
 
-  if (btnChat && btnEvidence) {
-    btnChat.addEventListener('click', () => {
-      btnChat.classList.add('active');
+  if (btnAsk && btnEvidence) {
+    btnAsk.addEventListener('click', () => {
+      btnAsk.classList.add('active');
       btnEvidence.classList.remove('active');
-      tabChat.classList.add('active');
+      tabAsk.classList.add('active');
       tabEvidence.classList.remove('active');
     });
 
     btnEvidence.addEventListener('click', () => {
       btnEvidence.classList.add('active');
-      btnChat.classList.remove('active');
+      btnAsk.classList.remove('active');
       tabEvidence.classList.add('active');
-      tabChat.classList.remove('active');
-      renderAllEvidence();
+      tabAsk.classList.remove('active');
+      renderDotWhiskerPlot();
+      renderEvidenceTable();
     });
   }
 
-  // 7. Evidence Split Buttons
-  const splitBtns = document.querySelectorAll('.split-btn');
-  splitBtns.forEach((btn) => {
+  // 5. Chart K Selector (K=100 vs K=200)
+  const chartKBtns = document.querySelectorAll('#chart-k-selector .seg-btn');
+  chartKBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
-      splitBtns.forEach((b) => b.classList.remove('active'));
+      chartKBtns.forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      state.activeSplit = btn.dataset.split;
-      renderAllEvidence();
+      state.activeChartK = parseInt(btn.dataset.chartk, 10);
+      renderDotWhiskerPlot();
     });
   });
 
-  // 8. Preset Prompt Chips
-  const chips = document.querySelectorAll('.chip');
-  chips.forEach((chip) => {
-    chip.addEventListener('click', () => {
-      const prompt = chip.dataset.prompt;
-      handleSendMessage(prompt);
+  // 6. Split Selector (Test vs Dev)
+  const btnSplitTest = document.getElementById('btn-split-test');
+  const btnSplitDev = document.getElementById('btn-split-dev');
+  if (btnSplitTest && btnSplitDev) {
+    btnSplitTest.addEventListener('click', () => {
+      btnSplitTest.classList.add('active');
+      btnSplitDev.classList.remove('active');
+      state.activeSplit = 'test';
+      renderEvidenceTable();
+    });
+    btnSplitDev.addEventListener('click', () => {
+      btnSplitDev.classList.add('active');
+      btnSplitTest.classList.remove('active');
+      state.activeSplit = 'dev';
+      renderEvidenceTable();
+    });
+  }
+
+  // 7. Preset Prompts
+  const presetBtns = document.querySelectorAll('.preset-btn');
+  presetBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      handleSendMessage(btn.dataset.prompt);
     });
   });
 
-  // 9. Chat Input Form
+  // 8. Chat Form
   const chatForm = document.getElementById('chat-form');
   const chatInput = document.getElementById('chat-input');
   if (chatForm && chatInput) {
@@ -953,17 +1235,31 @@ function setupEventListeners() {
     });
   }
 
-  // 10. Live UTC Clock
-  const clockEl = document.getElementById('clock');
-  const updateClock = () => {
-    if (clockEl) {
-      const now = new Date();
-      clockEl.textContent = `${now.toISOString().substring(11, 19)} UTC`;
-    }
-  };
-  setInterval(updateClock, 1000);
-  updateClock();
+  // 9. About Modal Dialog
+  const btnAbout = document.getElementById('btn-about');
+  const aboutDialog = document.getElementById('about-dialog');
+  const btnDialogClose = document.getElementById('btn-dialog-close');
+
+  if (btnAbout && aboutDialog) {
+    btnAbout.addEventListener('click', () => {
+      aboutDialog.showModal();
+    });
+  }
+  if (btnDialogClose && aboutDialog) {
+    btnDialogClose.addEventListener('click', () => {
+      aboutDialog.close();
+    });
+  }
+  if (aboutDialog) {
+    aboutDialog.addEventListener('click', (e) => {
+      if (e.target === aboutDialog) {
+        aboutDialog.close();
+      }
+    });
+  }
+
+  // 10. Curve scrubber drag & keyboard
+  setupCurveScrubberInteractions();
 }
 
-// Initialize listeners on DOM ready
 setupEventListeners();
