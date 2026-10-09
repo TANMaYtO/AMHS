@@ -372,13 +372,27 @@ def get_scored_dataset() -> pd.DataFrame:
     return _CACHED_SCORED_DF
 
 
-def get_hotspots(mm_per_hr: float = 40.0, top_k: int = 25) -> dict[str, Any]:
+def get_hotspots(
+    mm_per_hr: float = 40.0,
+    top_k: int = 25,
+    city: str = "all",
+) -> dict[str, Any]:
     """Return GeoJSON FeatureCollection of top flooded hexes for a rainfall scenario."""
     df = get_scored_dataset()
 
+    city_lower = city.strip().lower()
+    if city_lower in ("gurugram", "gurgaon"):
+        city_mask = (df["lat"] <= 28.52) & (df["lon"] <= 77.12)
+        filtered_df = df[city_mask].copy()
+    elif city_lower in ("delhi", "new delhi"):
+        city_mask = ~((df["lat"] <= 28.52) & (df["lon"] <= 77.12))
+        filtered_df = df[city_mask].copy()
+    else:
+        filtered_df = df.copy()
+
     # Flooded condition: rainfall scenario >= hex trigger threshold
-    flooded_mask = mm_per_hr >= df["trigger_mm"]
-    flooded = df[flooded_mask].copy()
+    flooded_mask = mm_per_hr >= filtered_df["trigger_mm"]
+    flooded = filtered_df[flooded_mask].copy()
 
     total_flooded = int(len(flooded))
 

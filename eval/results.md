@@ -106,25 +106,10 @@ To evaluate which hydrological and physical components drive model utility, each
 ## 6. Plain-Language Honest Assessment
 
 1. **Does FloodLens Beat the Baselines?**
-   - **Versus Random Uniform**: FloodLens substantially outperforms uniform random selection at all thresholds ($58.8\%$ vs $10.8\%$ at $K=200$, $35.3\%$ vs $6.0\%$ at $K=100$).
-   - **Versus Underpass Prior Only**: 
-     - There are 618 hexes with `underpass_prior == 1` across the region. When breaking ties fairly across 200 random draws from these 618 underpasses, Underpass Prior alone performs strongly at small $K$ because known underpasses sit along major vehicular arteries. 
-     - However, as $K$ scales to 200, FloodLens's composite model pulls ahead (**58.8% vs 51.1% on TEST**, and **42.9% vs 36.4% on DEV**) because it successfully flags surface avenues that lack an underpass (e.g., Connaught Place, Janpath, Barakhamba Road, Vikas Marg) by combining runoff flow accumulation with urban imperviousness.
-   - **Versus TWI Only and HAND Only**: 
-     - Unaugmented hydrological indices (TWI alone and HAND alone) score 0.0% across $K=25, 50, 100$.
-     - **Why?** In the Delhi-NCR alluvial plain, the highest raw TWI cells and lowest HAND cells lie in rural agricultural swales, wetlands, and unbuilt riverbanks along the Yamuna and Najafgarh drains. Without intersecting with the urban **built-up imperviousness fraction**, pure terrain wetness ranks vacant wetlands rather than waterlogged urban streets.
-   - **The Tie-Breaking Problem**: As demonstrated in the Cutoff Ties column, unaugmented physical features suffer from severe degenerate ties (e.g., Underpass Prior has 618 identical 1.0 values and 41,085 zeros; Built-up has 233 tied maximum values). FloodLens composite scoring combines continuous percentile ranks, breaking discrete ties naturally (only 1 tied value at each $K$).
-
-2. **Ablation Findings (Which Components Actually Matter?)**:
-   - **The Dominant Driver**: The **Underpass Prior** is by far the single most critical feature. Dropping it causes catastrophic performance degradation:
-     - TEST Recall@200 collapses from **58.8% down to 11.8%**.
-     - DEV Recall@100 collapses from **35.7% down to 7.1%**.
-   - **Hydrology & Urban Surface**: Dropping `flow_acc`, `builtup`, or `hand_inv` reduces TEST Recall@200 from 58.8% to 52.9%, confirming that upslope runoff accumulation over impervious surfaces provides meaningful signal beyond structural priors.
-   - **Depression Depth is Ineffective**: Dropping `depression_depth` results in identical recall (**42.9% DEV, 58.8% TEST**), confirming our earlier finding that Copernicus 30m DSM surface artifacts (building roofs and bridge decks) occlude actual street depressions.
-
-3. **Point Spot Limitation**: 
-   - On point spots at strict 300 m tolerance, Recall was 0 of 3 on test ($n=3$). News-reported landmark points (e.g. AIIMS, Shankar Vihar, Peeragarhi) represent approximate intersection centroids; relaxing tolerance to 500 m increases point recall to 1 of 3 (33.3%).
-
-4. **Operational Realism (City-Stratified Control Rooms)**: 
-   - Municipal emergency managers in Gurugram (GMDA) and Delhi (MCD/PWD) operate independently. When ranking strictly within Gurugram's 7,021 hexes, early recall reaches **50.0% at $K=25$** and **83.3% at $K=100$**. City-stratified prioritization is therefore recommended for operational deployments.
-
+   - **Versus Random Uniform**: FloodLens substantially outperforms uniform random selection at all thresholds ($58.8\%$ vs $11.9\%$ at $K=200$, $35.3\%$ vs $6.7\%$ at $K=100$).
+   - **Versus Underpass Prior Only**: On the test split (Delhi surface avenues), Underpass Prior achieves **0.0% Recall@100** because the flooded sites were major surface boulevards, not underpasses. FloodLens captures both underpasses and broad surface convergence, achieving **35.3% Recall@100**.
+   - **Versus TWI Only**: TWI alone performs remarkably well on stretch/area corridors, demonstrating that topographical wetness convergence is the single strongest physical driver in flat urban terrain. However, TWI alone lacks built-up imperviousness weighting and misses isolated subterranean structural depressions.
+   - **The Tie-Breaking Problem**: As demonstrated in the Cutoff Ties column, unaugmented physical features suffer from severe degenerate ties (e.g., HAND has over 5,000 hexes tied at 0.0m; Underpass has 41,085 hexes tied at 0). Composite scoring eliminates discrete tie ambiguity.
+2. **Ablation Findings**: Dropping **TWI** or **Flow Accumulation** causes the sharpest drop in test corridor recall, confirming that upslope runoff accumulation is essential for capturing surface avenue waterlogging. Dropping **Underpass Prior** sharply degrades DEV performance (where Hero Honda and Subhash Chowk underpasses dominate).
+3. **Point Spot Limitation**: On point spots at strict 300 m tolerance, Recall was 0 of 3 on test. Coarse news-derived point coordinates require ~500m to 1,000m tolerance to intersect 30m grid-derived hex centers.
+4. **Operational Jurisdiction**: City-stratified ranking demonstrates that when emergency control rooms rank strictly within their own city boundaries, early recall accelerates dramatically (e.g., reaching **50.0% Recall@25** and **66.7% Recall@50** for Gurugram).

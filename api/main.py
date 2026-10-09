@@ -61,6 +61,7 @@ class ToolTraceItem(BaseModel):
     tool: str
     args: dict[str, Any]
     summary: str
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatResponse(BaseModel):
@@ -104,6 +105,11 @@ async def get_metadata() -> dict[str, Any]:
             "formula": "R_i = R_REF * exp(-K * S_i)",
             "r_ref_mm_hr": R_REF,
             "k_sensitivity": K,
+            "scale_type": "relative_display_scale",
+            "scale_note": (
+                "Relative display scale for scenario visualization, "
+                "not calibrated flood physics."
+            ),
         },
         "disclaimer": UNCALIBRATED_DISCLAIMER,
     }
@@ -123,9 +129,86 @@ async def hotspots_endpoint(
         le=500,
         description="Maximum number of top flooded hexes to return",
     ),
+    city: str = Query(
+        "all",
+        description="City filter: all | delhi | gurugram",
+    ),
 ) -> dict[str, Any]:
     """Return GeoJSON FeatureCollection of top flooded hexes ranked by severity."""
-    return get_hotspots(mm_per_hr=mm, top_k=top)
+    return get_hotspots(mm_per_hr=mm, top_k=top, city=city)
+
+
+@app.get("/data/underpasses")
+async def underpasses_endpoint() -> dict[str, Any]:
+    """Return OSM underpass priors as GeoJSON FeatureCollection."""
+    import json
+    from engine.config import UNDERPASSES_FILE
+
+    if UNDERPASSES_FILE.exists():
+        with open(UNDERPASSES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"type": "FeatureCollection", "features": []}
+
+
+@app.get("/data/spots")
+async def spots_endpoint() -> dict[str, Any]:
+    """Return ground truth news-reported spots as GeoJSON FeatureCollection."""
+    from pathlib import Path
+    import pandas as pd
+
+    spots_path = Path("eval/spots.csv")
+    if not spots_path.exists():
+        return {"type": "FeatureCollection", "features": []}
+
+    df = pd.read_csv(spots_path)
+    features: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        feat: dict[str, Any] = {
+            "type": "Feature",
+            "id": row["id"],
+            "geometry": {
+                "type": "Point",
+                "coordinates": [float(row["lon"]), float(row["lat"])],
+            },
+            "properties": {
+                "id": str(row["id"]),
+                "name": str(row["name"]),
+                "event_date": str(row["event_date"]),
+                "geom_type": str(row["geom_type"]),
+                "split": str(row["split"]),
+                "confidence": str(row.get("confidence", "medium")),
+            },
+        }
+        features.append(feat)
+    return {"type": "FeatureCollection", "features": features}
+
+
+@app.get("/forecast")
+async def forecast_endpoint(
+    location: str = Query("Delhi", description="Target location name"),
+) -> dict[str, Any]:
+    """Return Open-Meteo 48-hr precipitation forecast for location."""
+    import json
+    from agent.tools import get_forecast
+
+    res_str = get_forecast(location)
+    return json.loads(res_str)
+
+
+@app.get("/eval/results")
+async def eval_results_endpoint() -> dict[str, Any]:
+    """Return benchmark evaluation results JSON for evidence visualization."""
+    import json
+    from pathlib import Path
+
+    results_file = Path("eval/results.json")
+    if not results_file.exists():
+        # Fallback to baseline file if results.json not yet written
+        results_file = Path("eval/baseline_top200_and_recall.json")
+    if results_file.exists():
+        with open(results_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"error": "Evaluation results not found."}
 
 
 @app.post("/agent/chat", response_model=ChatResponse)
@@ -140,6 +223,7 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
             tool=t["tool"],
             args=t["args"],
             summary=t["summary"],
+            data=t.get("data", {}),
         )
         for t in traces
     ]

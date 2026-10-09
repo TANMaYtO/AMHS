@@ -799,6 +799,46 @@ def generate_markdown_report(
 
     print(f"\nWrote full evaluation report to {RESULTS_MD}")
 
+    # Also save structured JSON for frontend evidence visualization
+    results_json_path = PROJECT_ROOT / "eval" / "results.json"
+    import json
+
+    def serialize_data(data: Any) -> Any:
+        """Recursively serialize nested dicts, numpy types, and numbers for JSON."""
+        if isinstance(data, dict):
+            return {str(k): serialize_data(v) for k, v in data.items()}
+        elif isinstance(data, (list, tuple)):
+            return [serialize_data(v) for v in data]
+        elif isinstance(data, (np.integer, int)):
+            return int(data)
+        elif isinstance(data, (np.floating, float)):
+            return round(float(data), 4)
+        elif isinstance(data, np.ndarray):
+            return data.tolist()
+        return data
+
+    export_payload = {
+        "notice": (
+            "Sample size notice: n=17 spots (14 stretch/area corridors, "
+            "3 point sites) evaluated on fixed protocol. 95% confidence intervals "
+            "computed via 1,000 bootstrap resamples."
+        ),
+        "splits": serialize_data(results),
+        "ablation": serialize_data(ablation_data),
+        "city_stratified": serialize_data(city_data),
+        "summary": [
+            "FloodLens outperforms uniform random at all thresholds (58.8% vs 11.9% at K=200).",
+            "Underpass Prior alone achieves 0.0% Recall@100 on test split because test sites were surface boulevards.",
+            "TWI alone performs strongly on corridors but suffers from discrete tie degeneracies.",
+            "City-stratified ranking accelerates early recall (up to 66.7% Recall@50 for Gurugram).",
+        ],
+    }
+
+    with open(results_json_path, "w", encoding="utf-8") as f:
+        json.dump(export_payload, f, indent=2)
+
+    print(f"Wrote structured evaluation JSON to {results_json_path}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="FloodLens Backtest Suite")

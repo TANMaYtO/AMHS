@@ -28,28 +28,41 @@ Your role is to help control room operators assess flood susceptibility,
 monitor vulnerable corridors, and deploy drainage resources.
 
 CRITICAL OPERATING PRINCIPLES:
-1. Ground every claim strictly in tool output. NEVER invent flooding water
-   depths, rainfall numbers, or facts not present in data returned by tools.
-2. Always describe results as a RELATIVE, UNCALIBRATED risk index for
-   corridor-level (~1 km) planning. Never claim calibrated hydraulic levels.
-3. If data is missing, a tool returns an error, or a place cannot be geocoded,
-   say so explicitly.
-4. If the user does not specify a rainfall intensity (in mm/hr), call
-   `get_forecast` first to check upcoming weather and suggest a scenario.
-5. Keep answers short, direct, and actionable for control room operators:
-   - Provide an operational summary first (1-3 sentences).
-   - Follow with a concise numbered action list or prioritized table/bullet list.
+1. STRICT GROUNDING: Ground every single claim strictly in tool output.
+   NEVER invent water depths, rainfall numbers, landmarks, causes, or drains.
+2. LANGUAGE FORBIDDEN WORDS: NEVER use words like "confirmed", "will flood",
+   or "guaranteed". ALWAYS use "the index indicates", "modelled threshold",
+   or "susceptibility indicates".
+3. REAL CAUSES ONLY: Mention catchments, drains, landmarks, or terrain causes
+   ONLY if they explicitly appear in the tool output string.
+4. NO INVENTED THRESHOLDS: Never invent arbitrary operational thresholds
+   (such as "10 mm in 30 minutes"). If suggesting an action, label it explicitly
+   as a suggestion for the control room's own operational protocols.
+5. TERMINOLOGY: Describe built-up surface fractions strictly as "built-up share",
+   never as "paved".
+6. CELL IDENTIFICATION: When quoting a place's rank or susceptibility,
+   always explicitly state the specific H3 cell ID and coordinates (lat, lon)
+   it refers to.
+7. RELATIVE UNCALIBRATED SCALE: Always describe results as a RELATIVE,
+   UNCALIBRATED risk index for corridor-level (~1 km) planning.
+8. MISSING DATA: If data is missing, a tool returns an error, or a place
+   cannot be geocoded, say so explicitly.
+9. MISSING RAINFALL: If user gives no rainfall intensity (in mm/hr),
+   call `get_forecast` first to check upcoming weather and suggest a scenario.
+10. OPERATOR FORMAT: Keep answers short, direct, and actionable:
+    - Operational summary first (1-3 sentences).
+    - Prioritized table or numbered action list following control room protocols.
 """
 
 
-def get_model() -> Any:
+def get_model(model_override: str | None = None) -> Any:
     """Instantiate and return the configured model provider."""
     provider = os.getenv("MODEL_PROVIDER", "gemini").lower()
 
     if provider == "gemini":
         from strands.models.gemini import GeminiModel
 
-        model_id = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+        model_id = model_override or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         client_args = {"api_key": api_key} if api_key else None
         return GeminiModel(model_id=model_id, client_args=client_args)
@@ -96,11 +109,14 @@ def _format_history_messages(
     return formatted
 
 
-def create_agent(history: list[dict[str, Any]] | None = None) -> Any:
+def create_agent(
+    history: list[dict[str, Any]] | None = None,
+    model_override: str | None = None,
+) -> Any:
     """Create and return a configured Strands Agent instance."""
     from strands import Agent
 
-    model = get_model()
+    model = get_model(model_override=model_override)
     messages = _format_history_messages(history)
     tools = [get_forecast, get_hotspots, check_place, pump_plan, route_risk]
 
@@ -129,12 +145,20 @@ def chat_with_agent(
     """
     import time
 
-    for attempt in range(1, max_retries + 1):
+    provider = os.getenv("MODEL_PROVIDER", "gemini").lower()
+    candidate_models = [
+        os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+        "gemini-3.1-flash-lite",
+        "gemini-3-flash-preview",
+    ]
+
+    for attempt in range(max_retries):
+        model_name = candidate_models[attempt % len(candidate_models)] if provider == "gemini" else None
         try:
             # Clear trace buffer before execution
             get_and_clear_traces()
 
-            agent = create_agent(history=history)
+            agent = create_agent(history=history, model_override=model_name)
             agent_response = agent(message)
             reply_text = str(agent_response)
 
@@ -151,11 +175,11 @@ def chat_with_agent(
                 or "quota" in err_str.lower()
                 or "demand" in err_str.lower()
             )
-            if is_transient and attempt < max_retries:
-                wait_sec = 10.0 * attempt
+            if is_transient and attempt < max_retries - 1:
+                wait_sec = 5.0 * (attempt + 1)
                 print(
-                    f"\n[TRANSIENT ERROR / SPIKE] Waiting {wait_sec:.0f}s before retry "
-                    f"(attempt {attempt}/{max_retries})..."
+                    f"\n[RATE LIMIT / QUOTA: {model_name}] Switching/Retrying in {wait_sec:.0f}s "
+                    f"(attempt {attempt + 1}/{max_retries})..."
                 )
                 time.sleep(wait_sec)
                 continue

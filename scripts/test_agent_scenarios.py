@@ -23,6 +23,7 @@ SCENARIOS = [
     "Is Minto Bridge at risk at 40 mm/hr?",
     "I have 6 pumps, where should they go for 60 mm/hr?",
     "What does the forecast say for Gurugram?",
+    "Is the route from Connaught Place to Cyber City safe right now at 40 mm/hr?",
 ]
 
 
@@ -63,6 +64,8 @@ def run_scenarios() -> None:
             print(f"  [{t_idx}] Tool: {trace['tool']}")
             print(f"      Args: {json.dumps(trace['args'])}")
             print(f"      Summary: {trace['summary']}")
+            data_keys = list(trace.get("data", {}).keys())
+            print(f"      Data Payload Keys: {data_keys}")
 
         print("\n--- AGENT REPLY ---")
         print(data["reply"])

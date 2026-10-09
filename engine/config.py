@@ -64,20 +64,23 @@ WEIGHTS: dict[str, float] = {
     "depression_depth": 0.05,
 }
 
-# ── Rainfall Trigger Model Parameters ────────────────────────────────
+# ── Rainfall Trigger Model Parameters (Relative Display Scale) ─────────
 # R_i = R_REF * exp(-K * S_i)
-# At S=1.0: R = 80 * exp(-2.0) ~ 10.8 mm/hr (extreme sink spots flood first)
-# At S=0.5: R = 80 * exp(-1.0) ~ 29.4 mm/hr
-# At S=0.0: R = 80.0 mm/hr (high ridge lines)
-R_REF: float = 80.0  # mm/hr reference ceiling
-K: float = 2.0  # exponential sensitivity factor
+# NOTE: These targets establish a RELATIVE DISPLAY SCALE for scenario
+# visualization, NOT calibrated flood physics or absolute hydraulic levels.
+# Calibrated so the flooded share of the 41,703 hexes scales smoothly:
+# 20 mm/hr ~0.5% (top sinks), 40 mm/hr ~3%, 60 mm/hr ~8-9%, 80 mm/hr ~16%,
+# 100 mm/hr ~22-25%. Susceptibility scores S and ranking are invariant.
+R_REF: float = 8200.0  # mm/hr display-scale reference ceiling
+K: float = 7.60  # display-scale exponential sensitivity factor
 
 DEFAULT_TOP_K: int = 25
 DEFAULT_RAINFALL_MM: float = 40.0  # mm/hr
+DEFAULT_MODEL_ID: str = "gemini-2.5-flash"  # Pinned exact Gemini model ID
 
 UNCALIBRATED_DISCLAIMER: str = (
     "RELATIVE susceptibility index based on terrain hydrology, surface "
     "impermeability, and OpenStreetMap priors. The absolute mm/hr rainfall "
-    "trigger thresholds are uncalibrated assumptions designed for scenario "
-    "ranking and emergency response prioritization."
+    "trigger thresholds are a RELATIVE DISPLAY SCALE, not calibrated flood "
+    "physics or predicted water depths."
 )

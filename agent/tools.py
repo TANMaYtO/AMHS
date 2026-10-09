@@ -31,9 +31,16 @@ USER_AGENT = "FloodLens/1.0 (urban-flood-control-room)"
 _RECORDED_TRACES: list[dict[str, Any]] = []
 
 
-def record_tool_trace(tool_name: str, args: dict[str, Any], summary: str) -> None:
-    """Record an executed tool invocation for structured API tracing."""
-    _RECORDED_TRACES.append({"tool": tool_name, "args": args, "summary": summary})
+def record_tool_trace(
+    tool_name: str,
+    args: dict[str, Any],
+    summary: str,
+    data: dict[str, Any] | None = None,
+) -> None:
+    """Record an executed tool invocation with structured UI data payload."""
+    _RECORDED_TRACES.append(
+        {"tool": tool_name, "args": args, "summary": summary, "data": data or {}}
+    )
 
 
 def get_and_clear_traces() -> list[dict[str, Any]]:
@@ -226,7 +233,17 @@ def get_forecast(location: str) -> str:
             f"Peak {result['peak_hourly_mm']} mm/hr at {peak_time}, "
             f"total {result['total_mm_48h']} mm"
         )
-        record_tool_trace("get_forecast", {"location": location}, summary)
+        data_payload = {
+            "location": location,
+            "lat": round(lat, 4),
+            "lon": round(lon, 4),
+            "peak_hourly_mm": round(max_val, 2),
+            "peak_hour": peak_time,
+            "total_mm_48h": round(total_48h, 2),
+        }
+        record_tool_trace(
+            "get_forecast", {"location": location}, summary, data_payload
+        )
         return json.dumps(result, separators=(",", ":"))
     except Exception as exc:
         err_msg = f"Failed to retrieve weather forecast: {str(exc)}"
@@ -315,14 +332,17 @@ def get_hotspots(
             "for corridor-level (~1 km) planning."
         ),
     }
-    summary = (
-        f"Found {total_flooded} flooded hexes at {mm_per_hr:.1f} mm/hr in {city}; "
-        f"returned top {len(hotspots_list)}"
-    )
+    data_payload = {
+        "hex_ids": [h["hex_id"] for h in hotspots_list],
+        "top_hotspots": hotspots_list,
+        "rainfall_mm": float(mm_per_hr),
+        "city": city,
+    }
     record_tool_trace(
         "get_hotspots",
         {"mm_per_hr": mm_per_hr, "top_n": top_n, "city": city},
         summary,
+        data_payload,
     )
     return json.dumps(result, separators=(",", ":"))
 
@@ -416,10 +436,22 @@ def check_place(place: str, mm_per_hr: float = 40.0) -> str:
         f"{place}: score={score_val:.4f}, rank={citywide_rank}/{total_hexes}, "
         f"trigger={trigger_val:.1f} mm/hr, {status_str} at {mm_per_hr:.1f} mm/hr"
     )
+    data_payload = {
+        "place": place,
+        "hex_id": row["hex_id"],
+        "lat": round(lat, 4),
+        "lon": round(lon, 4),
+        "score": score_val,
+        "citywide_rank": citywide_rank,
+        "trigger_mm": trigger_val,
+        "floods_at_scenario": floods,
+        "nearest_place": row["nearest_place"],
+    }
     record_tool_trace(
         "check_place",
         {"place": place, "mm_per_hr": mm_per_hr},
         summary,
+        data_payload,
     )
     return json.dumps(result, separators=(",", ":"))
 
@@ -544,10 +576,28 @@ def pump_plan(
         f"Placed {len(chosen_pumps)} pumps covering "
         f"{round(covered_share, 1)}% of flooded severity at {mm_per_hr:.1f} mm/hr"
     )
+    data_payload = {
+        "pumps": [
+            {
+                "pump_id": p["pump_id"],
+                "hex_id": p["hex_id"],
+                "lat": p["lat"],
+                "lon": p["lon"],
+                "radius_m": int(radius_m),
+                "site_severity": p["site_severity"],
+                "nearest_place": p["nearest_place"],
+            }
+            for p in chosen_pumps
+        ],
+        "radius_m": int(radius_m),
+        "rainfall_mm_hr": float(mm_per_hr),
+        "covered_severity_share_pct": round(covered_share, 1),
+    }
     record_tool_trace(
         "pump_plan",
         {"n_pumps": n_pumps, "mm_per_hr": mm_per_hr, "radius_m": radius_m},
         summary,
+        data_payload,
     )
     return json.dumps(result, separators=(",", ":"))
 
@@ -665,10 +715,19 @@ def route_risk(origin: str, destination: str) -> str:
             f"Corridor {dist_km} km ({len(seen_cells)} hexes): "
             f"max score={max_score:.3f}, min trigger={min_trigger:.1f} mm/hr"
         )
+        data_payload = {
+            "origin": origin,
+            "destination": destination,
+            "route_coordinates": coords,
+            "corridor_distance_km": dist_km,
+            "estimated_duration_min": dur_min,
+            "top_risk_hexes": top_risk_spots,
+        }
         record_tool_trace(
             "route_risk",
             {"origin": origin, "destination": destination},
             summary,
+            data_payload,
         )
         return json.dumps(result, separators=(",", ":"))
     except Exception as exc:
