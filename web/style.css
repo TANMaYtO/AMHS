@@ -501,7 +501,26 @@ html, body {
 
 .curve-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  min-width: 220px;
+}
+
+#btn-use-forecast {
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.forecast-status-msg {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--risk-3);
+  max-width: 260px;
+  text-align: right;
+  line-height: 1.25;
+  display: none;
 }
 
 /* ==========================================================================
@@ -705,13 +724,15 @@ html, body {
 /* Interactive Tables in Agent Responses */
 .agent-table-wrapper {
   margin: 8px 0;
-  overflow-x: auto;
+  width: 100%;
+  overflow-x: hidden;
   border: 1px solid var(--rule-subtle);
   border-radius: 4px;
 }
 
 .agent-interactive-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 11px;
 }
@@ -719,15 +740,22 @@ html, body {
 .agent-interactive-table th {
   background: var(--surface-subtle);
   border-bottom: 1px solid var(--rule);
-  padding: 4px 6px;
+  padding: 5px 6px;
   text-align: left;
   font-weight: 600;
   color: var(--text-muted);
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 
 .agent-interactive-table td {
-  padding: 4px 6px;
+  padding: 5px 6px;
   border-bottom: 1px solid var(--rule-subtle);
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  vertical-align: top;
 }
 
 .agent-interactive-table tr.clickable-row {
@@ -737,6 +765,34 @@ html, body {
 
 .agent-interactive-table tr.clickable-row:hover {
   background: var(--control-blue-dim);
+}
+
+/* Expandable row cell details disclosure */
+.row-details {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.row-details summary {
+  color: var(--control-blue);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+
+.row-details summary:hover {
+  text-decoration: underline;
+}
+
+.row-details-body {
+  padding: 3px 5px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--rule-subtle);
+  border-radius: 3px;
+  margin-top: 2px;
+  font-size: 9.5px;
+  color: var(--text-muted);
+  word-break: break-all;
 }
 
 /* Hex ID folding */

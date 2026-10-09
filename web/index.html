@@ -127,9 +127,10 @@
             </div>
 
             <div class="curve-actions">
-              <button id="btn-use-forecast" class="btn-control" type="button">
-                Use forecast peak
+              <button id="btn-use-forecast" class="btn-control" type="button" title="Check live weather forecast">
+                Forecast peak: --
               </button>
+              <div id="forecast-status-msg" class="forecast-status-msg"></div>
             </div>
           </div>
         </section>
@@ -216,8 +217,8 @@
               <!-- Paired Difference Summary -->
               <div class="evidence-callout">
                 <div class="callout-heading">Comparison with underpass prior</div>
-                <p class="callout-body">
-                  FloodLens matches or exceeds the underpass-prior baseline at K=100 (difference 0.0 percentage points) and is +11.8 percentage points at K=200. The K=200 difference is not statistically distinguishable at &alpha; = 0.05, as the paired 95% bootstrap confidence interval [-5.9, +29.4] percentage points spans zero.
+                <p id="paired-callout-text" class="callout-body">
+                  Loading comparison with underpass prior...
                 </p>
               </div>
 
@@ -277,7 +278,7 @@
             </div>
             <div class="spec-row">
               <span class="spec-label">Terrain weights</span>
-              <span class="spec-value">HAND (25%), TWI (25%), Flow Acc (20%), Built-up (15%), Underpass (10%), Depression (5%)</span>
+              <span id="modal-weights-val" class="spec-value">Loading weights from /meta...</span>
             </div>
             <div class="spec-row">
               <span class="spec-label">Rainfall threshold</span>
@@ -285,7 +286,7 @@
             </div>
             <div class="spec-row">
               <span class="spec-label">Evaluation protocol</span>
-              <span class="spec-value">Fixed protocol on 17 news-verified waterlogging spots (14 corridors, 3 points)</span>
+              <span class="spec-value">Fixed protocol on 17 news-reported, locations approximate waterlogging spots (14 corridors, 3 points)</span>
             </div>
             <div class="dialog-disclaimer">
               <strong>Planning disclaimer:</strong> FloodLens produces a relative susceptibility ranking designed for corridor prioritization and pump pre-positioning. It operates at approximately 1 km spatial aggregation and does not simulate dynamic hydrodynamic water depths or storm sewer pipe hydraulics.

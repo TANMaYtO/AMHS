@@ -20,6 +20,7 @@ const state = {
   evaluationData: null,
   floodCurveData: null,
   forecastPeakMm: null,
+  forecastTotalMm: null,
   sliderDebounceTimer: null,
   history: [],
 };
@@ -351,6 +352,7 @@ map.on('load', async () => {
     loadFloodCurve(),
     loadEvidenceData(),
     fetchForecastInfo(),
+    loadMetaInfo(),
   ]);
 });
 
@@ -509,14 +511,40 @@ async function fetchForecastInfo() {
     if (!resp.ok) return;
     const data = await resp.json();
     if (data.peak_hourly_mm !== undefined) {
-      state.forecastPeakMm = Math.max(10, Math.min(100, Math.round(data.peak_hourly_mm)));
+      state.forecastPeakMm = Number(data.peak_hourly_mm);
+      state.forecastTotalMm = Number(
+        data.total_mm_48h !== undefined ? data.total_mm_48h : data.peak_hourly_mm
+      );
       const btn = document.getElementById('btn-use-forecast');
       if (btn) {
-        btn.textContent = `Use forecast peak (${state.forecastPeakMm} mm/hr)`;
+        btn.textContent = `Forecast peak ${state.forecastPeakMm.toFixed(1)} mm/hr (${state.forecastTotalMm.toFixed(1)} mm / 48h)`;
+        btn.title = `Forecast peak ${state.forecastPeakMm.toFixed(1)} mm/hr over the next 48 hours. Total: ${state.forecastTotalMm.toFixed(1)} mm`;
       }
     }
   } catch (err) {
     console.warn('[Forecast Error]', err);
+  }
+}
+
+async function loadMetaInfo() {
+  try {
+    const resp = await fetch('/meta');
+    if (!resp.ok) return;
+    const meta = await resp.json();
+    const weightsEl = document.getElementById('modal-weights-val');
+    if (weightsEl && meta.weights) {
+      const w = meta.weights;
+      const parts = [];
+      if (w.hand_inv !== undefined) parts.push(`HAND (${Math.round(w.hand_inv * 100)}%)`);
+      if (w.twi !== undefined) parts.push(`TWI (${Math.round(w.twi * 100)}%)`);
+      if (w.flow_acc !== undefined) parts.push(`Flow Acc (${Math.round(w.flow_acc * 100)}%)`);
+      if (w.builtup !== undefined) parts.push(`Built-up (${Math.round(w.builtup * 100)}%)`);
+      if (w.underpass_prior !== undefined) parts.push(`Underpass (${Math.round(w.underpass_prior * 100)}%)`);
+      if (w.depression_depth !== undefined) parts.push(`Depression (${Math.round(w.depression_depth * 100)}%)`);
+      weightsEl.textContent = parts.join(', ');
+    }
+  } catch (err) {
+    console.warn('[Meta Error]', err);
   }
 }
 
@@ -564,19 +592,29 @@ function renderFloodCurveSvg() {
   if (!svg || !state.floodCurveData || !state.floodCurveData.curve) return;
 
   const points = state.floodCurveData.curve;
-  const width = 480;
-  const height = 66;
-  const padLeft = 20;
-  const padRight = 32;
-  const padTop = 10;
-  const padBottom = 20;
+  const width = 500;
+  const height = 70;
+  const padLeft = 24;
+  const padRight = 36;
+  const padTop = 14;
+  const padBottom = 18;
 
-  const maxCells = points.reduce((m, p) => Math.max(m, p.flooded_cells), 1);
   const minMm = 10;
   const maxMm = 100;
+  const baselineY = height - padBottom;
 
-  const getX = (mm) => padLeft + ((mm - minMm) / (maxMm - minMm)) * (width - padLeft - padRight);
-  const getY = (cells) => height - padBottom - (cells / maxCells) * (height - padTop - padBottom);
+  const getX = (mm) =>
+    padLeft + ((mm - minMm) / (maxMm - minMm)) * (width - padLeft - padRight);
+
+  // Log10 scale mapping: from 10 cells (log10=1.0) to ~12,000 cells (log10=4.08)
+  const logMin = 1.0;
+  const logMax = 4.08;
+  const getY = (cells) => {
+    const safeCells = Math.max(1, cells);
+    const logVal = Math.log10(safeCells);
+    const t = Math.max(0, Math.min(1, (logVal - logMin) / (logMax - logMin)));
+    return baselineY - t * (baselineY - padTop);
+  };
 
   // Build SVG path
   let pathD = '';
@@ -588,7 +626,6 @@ function renderFloodCurveSvg() {
 
   const lastX = getX(maxMm);
   const firstX = getX(minMm);
-  const baselineY = height - padBottom;
   const areaD = `${pathD} L ${lastX.toFixed(1)} ${baselineY} L ${firstX.toFixed(1)} ${baselineY} Z`;
 
   // Current position
@@ -596,25 +633,66 @@ function renderFloodCurveSvg() {
   const currPt = points.find((p) => p.mm_per_hr === state.rainfallMm) || points[0];
   const currY = getY(currPt.flooded_cells);
 
+  // Gridlines at 10, 100, 1,000, 10,000
+  const gridLevels = [
+    { val: 10, label: '10' },
+    { val: 100, label: '100' },
+    { val: 1000, label: '1k' },
+    { val: 10000, label: '10k' },
+  ];
+
+  let gridlinesHtml = '';
+  gridLevels.forEach((g) => {
+    const gy = getY(g.val);
+    gridlinesHtml += `
+      <line x1="${padLeft}" y1="${gy.toFixed(1)}" x2="${width - padRight}" y2="${gy.toFixed(1)}" stroke="#DEE3E6" stroke-width="0.8" stroke-dasharray="2,2" />
+      <text x="${width - padRight + 3}" y="${(gy + 3).toFixed(1)}" font-size="7.5" fill="#798B99" font-family="inherit">${g.label}</text>
+    `;
+  });
+
+  // Milestone dots & counts at 20, 40, 60, 80 mm/hr
+  const milestones = [20, 40, 60, 80];
+  let milestonesHtml = '';
+  milestones.forEach((m) => {
+    const pt = points.find((p) => p.mm_per_hr === m);
+    if (!pt) return;
+    const mx = getX(m);
+    const my = getY(pt.flooded_cells);
+    milestonesHtml += `
+      <circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="2.2" fill="#E4572E" stroke="#FFFFFF" stroke-width="0.8" />
+      <text x="${mx.toFixed(1)}" y="${(my - 4).toFixed(1)}" font-size="7.5" font-weight="600" fill="#5B1A3A" font-family="inherit" text-anchor="middle">${pt.flooded_cells.toLocaleString()}</text>
+    `;
+  });
+
   // SVG Markup
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.innerHTML = `
-    <!-- Baseline Grid Line -->
+    <!-- Axis Title / Label -->
+    <text x="${padLeft}" y="${padTop - 3}" font-size="8" font-weight="600" fill="#5A6D7C" font-family="inherit">cells that may waterlog (log scale)</text>
+
+    <!-- Horizontal Gridlines at 10, 100, 1,000, 10,000 -->
+    ${gridlinesHtml}
+
+    <!-- Baseline Axis Line -->
     <line x1="${padLeft}" y1="${baselineY}" x2="${width - padRight}" y2="${baselineY}" stroke="#C9D1D6" stroke-width="1" />
-    
+
     <!-- Area Under Curve -->
     <path d="${areaD}" fill="rgba(228, 87, 46, 0.12)" />
 
     <!-- Curve Stroke -->
     <path d="${pathD}" fill="none" stroke="#E4572E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
 
-    <!-- Ticks & Labels along bottom -->
-    <g font-size="9" fill="#798B99" font-family="inherit" text-anchor="middle">
-      <text x="${getX(10)}" y="${height - 4}">10</text>
-      <text x="${getX(25)}" y="${height - 4}">25</text>
-      <text x="${getX(40)}" y="${height - 4}">40</text>
-      <text x="${getX(60)}" y="${height - 4}">60</text>
-      <text x="${getX(80)}" y="${height - 4}">80</text>
-      <text x="${getX(100)}" y="${height - 4}">100 mm/hr</text>
+    <!-- Milestone Dots and Labels at 20, 40, 60, 80 mm/hr -->
+    ${milestonesHtml}
+
+    <!-- Ticks & Labels along bottom baseline -->
+    <g font-size="8.5" fill="#798B99" font-family="inherit" text-anchor="middle">
+      <text x="${getX(10).toFixed(1)}" y="${height - 4}">10</text>
+      <text x="${getX(20).toFixed(1)}" y="${height - 4}">20</text>
+      <text x="${getX(40).toFixed(1)}" y="${height - 4}">40</text>
+      <text x="${getX(60).toFixed(1)}" y="${height - 4}">60</text>
+      <text x="${getX(80).toFixed(1)}" y="${height - 4}">80</text>
+      <text x="${getX(100).toFixed(1)}" y="${height - 4}">100 mm/hr</text>
     </g>
 
     <!-- Vertical Hairline at Active Scenario -->
@@ -648,8 +726,8 @@ function setupCurveScrubberInteractions() {
 
   const handlePointer = (clientX) => {
     const rect = wrapper.getBoundingClientRect();
-    const padLeft = 20 * (rect.width / 480);
-    const padRight = 32 * (rect.width / 480);
+    const padLeft = 24 * (rect.width / 500);
+    const padRight = 36 * (rect.width / 500);
     const usableWidth = rect.width - padLeft - padRight;
     const relX = Math.max(0, Math.min(usableWidth, clientX - rect.left - padLeft));
     const fraction = relX / usableWidth;
@@ -699,12 +777,28 @@ function setupCurveScrubberInteractions() {
     }
   });
 
-  // Forecast button
+  // Forecast button with strict scale guard
   const btnForecast = document.getElementById('btn-use-forecast');
+  const forecastMsgEl = document.getElementById('forecast-status-msg');
   if (btnForecast) {
     btnForecast.addEventListener('click', () => {
-      const target = state.forecastPeakMm || 40;
-      updateScrubberToMm(target);
+      if (state.forecastPeakMm === null) return;
+      if (state.forecastPeakMm < 10.0) {
+        if (forecastMsgEl) {
+          forecastMsgEl.textContent =
+            'Forecast is below the scale; no waterlogging expected from rain alone';
+          forecastMsgEl.style.display = 'block';
+          setTimeout(() => {
+            if (forecastMsgEl) forecastMsgEl.textContent = '';
+          }, 6000);
+        }
+        // Do NOT move the slider
+      } else {
+        if (forecastMsgEl) {
+          forecastMsgEl.textContent = '';
+        }
+        updateScrubberToMm(state.forecastPeakMm);
+      }
     });
   }
 }
@@ -785,9 +879,9 @@ function updateAgentOverlays(traces) {
   }
 }
 
-// Enhance markdown table rows with coordinate click handlers to flyTo
+// Enhance markdown table rows with coordinate click handlers to flyTo, sentence-case headers, and expandable details
 function enhanceAgentMessageDom(containerEl, traces) {
-  // 1. Attach click handlers to any table row that contains coordinates or pump sites
+  // 1. Interactive table enhancement
   const tables = containerEl.querySelectorAll('table');
   tables.forEach((tbl) => {
     tbl.classList.add('agent-interactive-table');
@@ -796,43 +890,185 @@ function enhanceAgentMessageDom(containerEl, traces) {
     tbl.parentNode.insertBefore(wrapper, tbl);
     wrapper.appendChild(tbl);
 
-    const rows = tbl.querySelectorAll('tbody tr');
-    rows.forEach((row, idx) => {
-      // Look for coordinates in cells
-      const text = row.innerText;
-      const coordMatch = text.match(/([2-3][0-9]\.[0-9]{2,6})[^\d]+(7[6-8]\.[0-9]{2,6})/);
+    const theadThs = Array.from(tbl.querySelectorAll('thead th'));
+    const rows = Array.from(tbl.querySelectorAll('tbody tr'));
 
+    // Normalize and sentence-case headers
+    const colMeta = theadThs.map((th, colIdx) => {
+      const orig = th.innerText.trim();
+      let norm = orig;
+      let type = 'other';
+
+      if (/(site|pump|location|corridor|name|place)/i.test(orig)) {
+        norm = 'Location';
+        type = 'location';
+      } else if (/(turns on|trigger|threshold|mm\/hr)/i.test(orig)) {
+        norm = 'Turns on at (mm/hr)';
+        type = 'trigger';
+      } else if (/(why|reason|risk factors)/i.test(orig)) {
+        norm = 'Why';
+        type = 'why';
+      } else if (/(severity|score)/i.test(orig)) {
+        norm = 'Severity';
+        type = 'severity';
+      } else if (/(nearest underpass|nearest prior)/i.test(orig)) {
+        norm = 'Nearest underpass';
+        type = 'underpass';
+      } else if (/(hex id|h3 index|h3 id|cell id)/i.test(orig)) {
+        norm = 'Hex id';
+        type = 'hex';
+      } else if (/(coord|lat\/lon|lat|lon)/i.test(orig)) {
+        norm = 'Coordinates';
+        type = 'coords';
+      } else {
+        norm = orig.charAt(0).toUpperCase() + orig.slice(1).toLowerCase();
+      }
+
+      th.textContent = norm;
+      return { colIdx, th, orig, norm, type };
+    });
+
+    const hexColIdx = colMeta.findIndex((c) => c.type === 'hex');
+    const coordsColIdx = colMeta.findIndex((c) => c.type === 'coords');
+
+    // Extract row data, attach details disclosures, and wire up flyTo
+    rows.forEach((row, rowIdx) => {
+      const cells = Array.from(row.querySelectorAll('td'));
       let lat = null;
       let lon = null;
+      let hexId = null;
+
+      const rowText = row.innerText;
+      const coordMatch = rowText.match(/([2-3][0-9]\.[0-9]{2,6})[^\d]+(7[6-8]\.[0-9]{2,6})/);
       if (coordMatch) {
         lat = parseFloat(coordMatch[1]);
         lon = parseFloat(coordMatch[2]);
       } else {
-        // Fallback: check if we have traces with pumps matching row index
         for (const t of traces) {
-          if (t.data && t.data.pumps && t.data.pumps[idx]) {
-            lat = t.data.pumps[idx].lat;
-            lon = t.data.pumps[idx].lon;
+          const d = t.data || {};
+          if (d.pumps && d.pumps[rowIdx]) {
+            lat = d.pumps[rowIdx].lat;
+            lon = d.pumps[rowIdx].lon;
+            hexId = d.pumps[rowIdx].id;
+            break;
+          }
+          if (d.top_risk_hexes && d.top_risk_hexes[rowIdx]) {
+            lat = d.top_risk_hexes[rowIdx].lat;
+            lon = d.top_risk_hexes[rowIdx].lon;
+            hexId = d.top_risk_hexes[rowIdx].id;
+            break;
+          }
+          if (d.hotspots && d.hotspots[rowIdx]) {
+            lat = d.hotspots[rowIdx].lat;
+            lon = d.hotspots[rowIdx].lon;
+            hexId = d.hotspots[rowIdx].id;
+            break;
+          }
+          if (d.lat && d.lon) {
+            lat = d.lat;
+            lon = d.lon;
             break;
           }
         }
       }
 
+      const hexMatch = rowText.match(/\b8960[0-9a-f]{11}\b/i);
+      if (hexMatch) hexId = hexMatch[0];
+
+      if (hexColIdx !== -1 && cells[hexColIdx]) {
+        const val = cells[hexColIdx].innerText.trim();
+        if (val) hexId = val;
+      }
+      if (coordsColIdx !== -1 && cells[coordsColIdx]) {
+        const val = cells[coordsColIdx].innerText.trim();
+        const m = val.match(/([2-3][0-9]\.[0-9]{2,6})[^\d]+(7[6-8]\.[0-9]{2,6})/);
+        if (m) {
+          lat = parseFloat(m[1]);
+          lon = parseFloat(m[2]);
+        }
+      }
+
+      // Add expandable details disclosure into the first non-hex/non-coord cell
+      const visibleCells = cells.filter((_, idx) => idx !== hexColIdx && idx !== coordsColIdx);
+      if ((hexId || (lat && lon)) && visibleCells.length > 0) {
+        const targetCell = visibleCells[0];
+        if (!targetCell.querySelector('.row-details')) {
+          const details = document.createElement('details');
+          details.className = 'row-details';
+          const coordStr = lat && lon ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : '';
+          const hexStr = hexId ? hexId : '';
+          details.innerHTML = `
+            <summary class="row-details-summary">Cell details</summary>
+            <div class="row-details-body">
+              ${hexStr ? `<div><code>${hexStr}</code></div>` : ''}
+              ${coordStr ? `<div>Coord: ${coordStr}</div>` : ''}
+            </div>
+          `;
+          targetCell.appendChild(details);
+        }
+      }
+
+      // Wire row click flyTo
       if (lat && lon) {
         row.classList.add('clickable-row');
         row.title = 'Click to focus this site on the map';
-        row.addEventListener('click', () => {
+        row.dataset.lat = lat;
+        row.dataset.lon = lon;
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('.row-details')) return;
           map.flyTo({ center: [lon, lat], zoom: 14, duration: 900 });
         });
       }
     });
+
+    // Remove raw hex and coordinates columns from the table to prevent horizontal overflow
+    const colsToRemove = [];
+    if (coordsColIdx !== -1) colsToRemove.push(coordsColIdx);
+    if (hexColIdx !== -1) colsToRemove.push(hexColIdx);
+    colsToRemove.sort((a, b) => b - a);
+    colsToRemove.forEach((idx) => {
+      if (theadThs[idx]) theadThs[idx].remove();
+      rows.forEach((r) => {
+        const tds = r.querySelectorAll('td');
+        if (tds[idx]) tds[idx].remove();
+      });
+    });
+
+    // Reorder remaining columns so Location is first, then Turns on at, then Why
+    const remainingThs = Array.from(tbl.querySelectorAll('thead th'));
+    const orderPriority = { location: 1, trigger: 2, severity: 3, underpass: 4, why: 5, other: 6 };
+    const indexedCols = remainingThs.map((th, idx) => {
+      const text = th.innerText.toLowerCase();
+      let type = 'other';
+      if (text.includes('location') || text.includes('site') || text.includes('pump') || text.includes('corridor')) type = 'location';
+      else if (text.includes('turns on') || text.includes('trigger') || text.includes('mm/hr')) type = 'trigger';
+      else if (text.includes('why') || text.includes('reason')) type = 'why';
+      else if (text.includes('severity')) type = 'severity';
+      else if (text.includes('underpass')) type = 'underpass';
+      return { th, idx, type, prio: orderPriority[type] || 6 };
+    });
+
+    // Sort column definitions by priority
+    const sortedCols = [...indexedCols].sort((a, b) => a.prio - b.prio);
+    const orderChanged = sortedCols.some((c, i) => c.idx !== i);
+    if (orderChanged) {
+      const theadTr = tbl.querySelector('thead tr');
+      if (theadTr) {
+        sortedCols.forEach((c) => theadTr.appendChild(c.th));
+      }
+      rows.forEach((r) => {
+        const tds = Array.from(r.querySelectorAll('td'));
+        sortedCols.forEach((c) => {
+          if (tds[c.idx]) r.appendChild(tds[c.idx]);
+        });
+      });
+    }
   });
 
-  // 2. Wrap any lengthy hex ID blocks in <details class="hex-fold">
+  // 2. Wrap standalone lengthy H3 hex ID lists in paragraphs
   const paragraphs = containerEl.querySelectorAll('p, li');
   paragraphs.forEach((p) => {
     const text = p.innerText;
-    // Check if paragraph contains 15-char H3 hex IDs (e.g. 89608...)
     const hexMatches = text.match(/\b8960[0-9a-f]{11}\b/gi);
     if (hexMatches && hexMatches.length > 2) {
       const summaryText = `Show ${hexMatches.length} H3 cell IDs`;
@@ -954,11 +1190,45 @@ async function loadEvidenceData() {
     if (!resp.ok) return;
     state.evaluationData = await resp.json();
     renderDotWhiskerPlot();
+    renderPairedCallout();
     renderEvidenceTakeaways();
     renderEvidenceTable();
   } catch (err) {
     console.warn('[Evidence Error]', err);
   }
+}
+
+function renderPairedCallout() {
+  const calloutEl = document.getElementById('paired-callout-text');
+  if (!calloutEl || !state.evaluationData || !state.evaluationData.paired_bootstrap_cis) return;
+  const pair200 = state.evaluationData.paired_bootstrap_cis['200'];
+  const pair100 = state.evaluationData.paired_bootstrap_cis['100'];
+  if (!pair200) return;
+
+  const fmtDiff = (d) => {
+    const rounded = Number((d * 100).toFixed(1));
+    if (Math.abs(rounded) < 0.001) return '+0.0%';
+    return (rounded > 0 ? '+' : '') + rounded.toFixed(1) + '%';
+  };
+  const fmtCi = (low, high) => {
+    const l = Number((low * 100).toFixed(1));
+    const h = Number((high * 100).toFixed(1));
+    const lStr = Math.abs(l) < 0.001 ? '0.0%' : (l > 0 ? '+' : '') + l.toFixed(1) + '%';
+    const hStr = Math.abs(h) < 0.001 ? '0.0%' : (h > 0 ? '+' : '') + h.toFixed(1) + '%';
+    return `[${lStr}, ${hStr}]`;
+  };
+
+  const diff200 = fmtDiff(pair200.diff);
+  const ci200 = fmtCi(pair200.ci_95[0], pair200.ci_95[1]);
+
+  let diff100 = '+0.0%';
+  let ci100 = '[-29.4%, +29.4%]';
+  if (pair100) {
+    diff100 = fmtDiff(pair100.diff);
+    ci100 = fmtCi(pair100.ci_95[0], pair100.ci_95[1]);
+  }
+
+  calloutEl.textContent = `On the 17-spot test sample, the paired difference between FloodLens and the underpass prior alone is ${diff200} at K=200 (95% CI ${ci200}) and ${diff100} at K=100 (95% CI ${ci100}). Because the confidence interval crosses zero, the performance difference is not statistically distinguishable at this sample size; FloodLens provides corridor coverage and rainfall scaling beyond the prior.`;
 }
 
 function renderDotWhiskerPlot() {
@@ -1184,6 +1454,7 @@ function setupEventListeners() {
       tabEvidence.classList.add('active');
       tabAsk.classList.remove('active');
       renderDotWhiskerPlot();
+      renderPairedCallout();
       renderEvidenceTable();
     });
   }

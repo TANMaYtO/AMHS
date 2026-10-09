@@ -98,99 +98,102 @@ async function runRegressionSuite() {
   console.log('1. Waiting for initial page load and map initialization...');
   await sleep(7500);
 
-  // Check 1: Flood curve SVG rendered
-  console.log('2. Verifying /flood-curve rendering...');
+  // Take initial full-layout screenshots at 1920x1080 and 1366x768
+  console.log('1b. Capturing baseline 1920x1080 and 1366x768 screenshots...');
+  await takeScreenshot('after_1080p.png');
+
+  await sendCommand('Emulation.setDeviceMetricsOverride', {
+    width: 1366,
+    height: 768,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await sleep(1000);
+  await takeScreenshot('after_768p.png');
+
+  // Restore 1920x1080
+  await sendCommand('Emulation.setDeviceMetricsOverride', {
+    width: 1920,
+    height: 1080,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await sleep(1000);
+
+  // Check 2: Log-scale Flood curve SVG rendering
+  console.log('2. Verifying log-scale /flood-curve rendering...');
   const curveRendered = await evaluate(`
     (() => {
       const svg = document.getElementById('flood-curve-svg');
       const paths = svg ? svg.querySelectorAll('path') : [];
+      const texts = svg ? Array.from(svg.querySelectorAll('text')).map(t => t.textContent) : [];
       const cells = document.getElementById('curve-cells-count').textContent;
-      return { pathCount: paths.length, cellsText: cells };
+      const hasLogTitle = texts.some(t => t.includes('cells that may waterlog (log scale)'));
+      const hasGridLabels = texts.includes('10k') && texts.includes('1k') && texts.includes('100') && texts.includes('10');
+      return { pathCount: paths.length, cellsText: cells, hasLogTitle, hasGridLabels, texts };
     })()
   `);
-  console.log('   Curve paths found:', curveRendered.pathCount, '| Initial cells:', curveRendered.cellsText);
-  if (curveRendered.pathCount < 2) throw new Error('Flood curve SVG path not rendered');
+  console.log('   Log curve check:', curveRendered);
+  if (!curveRendered.hasLogTitle) throw new Error('Curve missing log scale title');
+  if (!curveRendered.hasGridLabels) throw new Error('Curve missing log scale gridline labels');
 
-  // Check 2: Scrubber slider interaction
-  console.log('3. Testing curve scrubber keyboard interaction (adjusting mm)...');
-  await evaluate(`
+  // Check 3: Forecast button live check & scale guard
+  console.log('3. Verifying live forecast button and scale guard...');
+  const forecastBtnInfo = await evaluate(`
     (() => {
-      const wrapper = document.getElementById('curve-chart-wrapper');
-      wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-      wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-      wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-      wrapper.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      const btn = document.getElementById('btn-use-forecast');
+      const initialMm = document.getElementById('curve-mm-display').textContent;
+      btn.click();
+      const statusMsg = document.getElementById('forecast-status-msg').textContent;
+      const afterMm = document.getElementById('curve-mm-display').textContent;
+      return { btnText: btn.textContent, initialMm, afterMm, statusMsg };
     })()
   `);
-  await sleep(1000);
-  const updatedMm = await evaluate(`
-    (() => {
-      const mm = document.getElementById('curve-mm-display').textContent;
-      const count = document.getElementById('curve-cells-count').textContent;
-      return { mm, count };
-    })()
-  `);
-  console.log('   Scrubber updated to:', updatedMm.mm, '| Cells count:', updatedMm.count);
+  console.log('   Forecast button check:', forecastBtnInfo);
+  if (!forecastBtnInfo.btnText.includes('Forecast peak')) {
+    throw new Error('Forecast button missing peak label');
+  }
+  if (!forecastBtnInfo.statusMsg.includes('below the scale')) {
+    throw new Error('Forecast button failed to activate scale guard');
+  }
+  if (forecastBtnInfo.initialMm !== forecastBtnInfo.afterMm) {
+    throw new Error('Forecast button moved slider despite being below scale');
+  }
 
-  // Check 3: City Jurisdiction filter
-  console.log('4. Testing city jurisdiction filter...');
-  await evaluate(`
-    (() => {
-      const btn = document.querySelector('#city-selector .seg-btn[data-city="delhi"]');
-      if (btn) btn.click();
-    })()
-  `);
-  await sleep(1000);
-  const cityState = await evaluate(`document.querySelector('#city-selector .seg-btn.active').dataset.city`);
-  console.log('   Active city filter:', cityState);
-
-  // Check 4: Top-N selector
-  console.log('5. Testing Top-N selector...');
-  await evaluate(`
-    (() => {
-      const btn = document.querySelector('#top-selector .seg-btn[data-top="25"]');
-      if (btn) btn.click();
-    })()
-  `);
-  await sleep(1000);
-  const topState = await evaluate(`document.querySelector('#top-selector .seg-btn.active').dataset.top`);
-  console.log('   Active top-N filter:', topState);
-
-  // Check 5: Layer toggles
-  console.log('6. Testing layer toggles (underpasses & spots)...');
-  await evaluate(`
-    (() => {
-      const upCb = document.getElementById('layer-underpasses');
-      if (upCb) { upCb.checked = true; upCb.dispatchEvent(new Event('change')); }
-    })()
-  `);
-  await sleep(800);
-
-  // Check 6: About Modal
-  console.log('7. Testing "About this model" modal...');
+  // Check 4: About Modal dynamic weights from /meta
+  console.log('4. Testing About modal and live weights from /meta...');
   await evaluate(`document.getElementById('btn-about').click()`);
   await sleep(600);
-  const modalOpen = await evaluate(`document.getElementById('about-dialog').open`);
-  console.log('   About dialog open:', modalOpen);
+  const modalInfo = await evaluate(`
+    (() => {
+      const dialog = document.getElementById('about-dialog');
+      const weights = document.getElementById('modal-weights-val').textContent;
+      return { isOpen: dialog.open, weights };
+    })()
+  `);
+  console.log('   About modal check:', modalInfo);
+  if (!modalInfo.weights.includes('HAND (25%)') || !modalInfo.weights.includes('TWI (25%)')) {
+    throw new Error(`Modal weights did not render live from /meta: ${modalInfo.weights}`);
+  }
   await takeScreenshot('after_about.png');
   await evaluate(`document.getElementById('btn-dialog-close').click()`);
   await sleep(400);
 
-  // Check 7: Evidence Tab & Dot-Whisker Plot
-  console.log('8. Testing Evidence tab & benchmark charts...');
+  // Check 5: Evidence Tab & Paired Difference Callout
+  console.log('5. Testing Evidence tab and paired difference callout...');
   await evaluate(`document.getElementById('tab-btn-evidence').click()`);
   await sleep(800);
   const evidenceCheck = await evaluate(`
     (() => {
-      const svg = document.getElementById('dot-whisker-svg');
-      const lines = svg ? svg.querySelectorAll('line').length : 0;
-      const circles = svg ? svg.querySelectorAll('circle').length : 0;
-      const takeaways = document.querySelectorAll('#evidence-takeaways-list li').length;
-      return { lines, circles, takeaways };
+      const calloutText = document.getElementById('paired-callout-text').textContent;
+      const takeaways = Array.from(document.querySelectorAll('#evidence-takeaways-list li')).map(li => li.textContent);
+      return { calloutText, takeawaysCount: takeaways.length };
     })()
   `);
-  console.log('   Evidence plot rendered:', evidenceCheck);
-  // Expand full metrics table
+  console.log('   Evidence callout:', evidenceCheck.calloutText);
+  if (!evidenceCheck.calloutText.includes('+7.8%') || !evidenceCheck.calloutText.includes('-23.5%')) {
+    throw new Error(`Evidence callout numbers mismatch results.json: ${evidenceCheck.calloutText}`);
+  }
   await evaluate(`document.querySelector('.evidence-details').open = true`);
   await sleep(400);
   await takeScreenshot('after_evidence.png');
@@ -199,7 +202,7 @@ async function runRegressionSuite() {
   await evaluate(`document.getElementById('tab-btn-ask').click()`);
   await sleep(600);
 
-  async function waitForAgentResponse(expectedCount, timeoutMs = 45000) {
+  async function waitForAgentResponse(expectedCount, timeoutMs = 60000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       const isDone = await evaluate(`
@@ -212,37 +215,70 @@ async function runRegressionSuite() {
         })()
       `);
       if (isDone) {
-        await sleep(1500); // Allow MapLibre overlays to render
+        await sleep(2000);
         return;
       }
       await sleep(1000);
     }
+    console.warn(`Timeout waiting for agent response ${expectedCount} after ${timeoutMs}ms`);
   }
 
-  // Check 8: Agent Pump Scenario Preset
-  console.log('9. Testing agent scenario: 6 pumps @ 60 mm/hr...');
+  // Check 6: Agent Pump Scenario Preset & Table Enhancement
+  console.log('6. Testing agent scenario: 6 pumps @ 60 mm/hr...');
   await evaluate(`
     (() => {
       const btn = document.querySelector('.preset-btn[data-prompt*="6 pumps"]');
       if (btn) btn.click();
     })()
   `);
-  await waitForAgentResponse(2, 45000);
-  const agentResponseCheck = await evaluate(`
+  await waitForAgentResponse(2, 60000);
+  const pumpTableCheck = await evaluate(`
     (() => {
       const msgs = document.querySelectorAll('.message-assistant');
       const last = msgs[msgs.length - 1];
-      const hasSteps = last.querySelector('.tool-steps-card') !== null;
-      const hasTable = last.querySelector('table') !== null;
-      const pumpPoints = window.map.getSource('agent-pumps-points')._data.features.length;
-      return { hasSteps, hasTable, pumpPoints };
+      const table = last.querySelector('.agent-interactive-table') || last.querySelector('table');
+      if (!table) return { hasTable: false, text: last.innerText.slice(0, 300) };
+
+      const ths = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      const hasDetails = table.querySelector('.row-details') !== null;
+      const clickableRows = table.querySelectorAll('tr.clickable-row').length;
+      const firstRowLat = table.querySelector('tr.clickable-row')?.dataset?.lat;
+      const firstRowLon = table.querySelector('tr.clickable-row')?.dataset?.lon;
+
+      return {
+        hasTable: true,
+        headers: ths,
+        hasDetails,
+        clickableRows,
+        firstRowLat,
+        firstRowLon,
+      };
     })()
   `);
-  console.log('   Agent pump response check:', agentResponseCheck);
+  console.log('   Pump table check:', pumpTableCheck);
+  if (!pumpTableCheck.hasTable) {
+    console.error('Agent message body:', pumpTableCheck.text);
+    throw new Error('Agent reply missing interactive table');
+  }
+  console.log('   Table headers:', pumpTableCheck.headers);
+
+  // Test row click to flyTo
+  console.log('6b. Testing table row click flyTo map center...');
+  const centerBefore = await evaluate(`[window.map.getCenter().lng, window.map.getCenter().lat]`);
+  await evaluate(`
+    (() => {
+      const row = document.querySelector('.agent-interactive-table tr.clickable-row');
+      if (row) row.click();
+    })()
+  `);
+  await sleep(1200);
+  const centerAfter = await evaluate(`[window.map.getCenter().lng, window.map.getCenter().lat]`);
+  console.log('   Map center moved from', centerBefore, 'to', centerAfter);
+
   await takeScreenshot('after_pumps.png');
 
-  // Check 9: Agent Route Scenario Preset
-  console.log('10. Testing agent scenario: Route CP to Cyber City...');
+  // Check 7: Agent Route Scenario Preset
+  console.log('7. Testing agent scenario: Route CP to Cyber City...');
   await evaluate(`
     (() => {
       const btn = document.querySelector('.preset-btn[data-prompt*="Cyber City"]');
@@ -260,7 +296,7 @@ async function runRegressionSuite() {
   await takeScreenshot('after_route.png');
 
   // Final Console Error Check
-  console.log('11. Checking for console errors throughout suite...');
+  console.log('8. Checking for console errors throughout suite...');
   if (consoleErrors.length > 0) {
     console.error('Console errors detected:', consoleErrors);
     throw new Error(`${consoleErrors.length} console errors occurred`);

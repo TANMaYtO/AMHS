@@ -52,6 +52,10 @@ CRITICAL OPERATING PRINCIPLES:
 10. OPERATOR FORMAT: Keep answers short, direct, and actionable:
     - Operational summary first (1-3 sentences).
     - Prioritized table or numbered action list following control room protocols.
+11. TABLE FORMATTING:
+    - Always use sentence-case column headers: "Location", "Turns on at (mm/hr)", "Why", "Cell ID", "Coordinates".
+    - Place name or landmark first, then "Turns on at (mm/hr)", then "Why".
+    - Always include cell ID and coordinates (lat, lon) in each row so operators can inspect site details.
 """
 
 
