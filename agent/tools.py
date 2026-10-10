@@ -544,6 +544,8 @@ def pump_plan(
                 "lat": round(float(row["lat"]), 4),
                 "lon": round(float(row["lon"]), 4),
                 "nearest_place": row["nearest_place"],
+                "trigger_mm": round(float(row["trigger_mm"]), 1),
+                "why": row["why"],
                 "site_severity": round(float(row["severity"]), 2),
                 "hexes_covered_in_radius": len(best_covered_set),
                 "severity_covered": round(float(best_gain), 2),
@@ -584,6 +586,8 @@ def pump_plan(
                 "lat": p["lat"],
                 "lon": p["lon"],
                 "radius_m": int(radius_m),
+                "trigger_mm": p["trigger_mm"],
+                "why": p["why"],
                 "site_severity": p["site_severity"],
                 "nearest_place": p["nearest_place"],
             }

@@ -316,7 +316,7 @@ def compute_scores(df: pd.DataFrame) -> pd.DataFrame:
         factors: list[tuple[float, str]] = []
 
         if p_underpass[i] > 0.5:
-            factors.append((w["underpass_prior"] * 1.5, "Submerged road underpass prior"))
+            factors.append((w["underpass_prior"] * 1.5, "underpass (below street level) prior"))
 
         hand_val = float(scored["min_hand"].iloc[i])
         hand_disp = 0.0 if abs(hand_val) < 0.05 else hand_val
@@ -334,7 +334,7 @@ def compute_scores(df: pd.DataFrame) -> pd.DataFrame:
         builtup_pct = int(round(float(scored["builtup_fraction"].iloc[i]) * 100))
         if p_builtup[i] >= 0.60:
             factors.append(
-                (w["builtup"] * p_builtup[i], f"Paved impervious surface ({builtup_pct}%)")
+                (w["builtup"] * p_builtup[i], f"Built-up share ({builtup_pct}%)")
             )
 
         if p_flow_acc[i] >= 0.75:

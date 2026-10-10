@@ -69,7 +69,7 @@ for split in splits:
     point_mask = (split_spots["geom_type"] == "point").to_numpy()
     stretch_mask = (split_spots["geom_type"].isin(["stretch", "area"])).to_numpy()
 
-    metrics, cis, ties = evaluate_deterministic_ranking(
+    metrics, cis, ties, _ = evaluate_deterministic_ranking(
         ranking_scores,
         hex_coords_m,
         spot_coords_m,

@@ -730,6 +730,13 @@ html, body {
   border-radius: 4px;
 }
 
+.table-caption-summary {
+  margin: 3px 0 8px 2px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 .agent-interactive-table {
   width: 100%;
   table-layout: fixed;

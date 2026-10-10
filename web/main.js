@@ -592,8 +592,9 @@ function renderFloodCurveSvg() {
   if (!svg || !state.floodCurveData || !state.floodCurveData.curve) return;
 
   const points = state.floodCurveData.curve;
-  const width = 500;
-  const height = 70;
+  const rect = svg.getBoundingClientRect();
+  const width = rect.width > 100 ? Math.round(rect.width) : 500;
+  const height = rect.height > 30 ? Math.round(rect.height) : 70;
   const padLeft = 24;
   const padRight = 36;
   const padTop = 14;
@@ -650,7 +651,7 @@ function renderFloodCurveSvg() {
     `;
   });
 
-  // Milestone dots & counts at 20, 40, 60, 80 mm/hr
+  // Milestone dots & counts at 20, 40, 60, 80 mm/hr (offset to avoid marker collision)
   const milestones = [20, 40, 60, 80];
   let milestonesHtml = '';
   milestones.forEach((m) => {
@@ -660,7 +661,7 @@ function renderFloodCurveSvg() {
     const my = getY(pt.flooded_cells);
     milestonesHtml += `
       <circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="2.2" fill="#E4572E" stroke="#FFFFFF" stroke-width="0.8" />
-      <text x="${mx.toFixed(1)}" y="${(my - 4).toFixed(1)}" font-size="7.5" font-weight="600" fill="#5B1A3A" font-family="inherit" text-anchor="middle">${pt.flooded_cells.toLocaleString()}</text>
+      <text x="${(mx - 8).toFixed(1)}" y="${(my - 5).toFixed(1)}" font-size="7.5" font-weight="600" fill="#5B1A3A" font-family="inherit" text-anchor="end" paint-order="stroke" stroke="#EEF1F2" stroke-width="2">${pt.flooded_cells.toLocaleString()}</text>
     `;
   });
 
@@ -705,29 +706,40 @@ function renderFloodCurveSvg() {
   updateBottomBarReadout(state.rainfallMm);
 }
 
-function updateScrubberToMm(newMm) {
+function updateScrubberToMm(newMm, immediate = false) {
   const clampedMm = Math.max(10, Math.min(100, Math.round(newMm / 5) * 5));
-  if (clampedMm === state.rainfallMm) return;
+  if (clampedMm === state.rainfallMm) {
+    if (immediate) loadFloodedHexes();
+    return;
+  }
 
   state.rainfallMm = clampedMm;
   renderFloodCurveSvg();
 
   clearTimeout(state.sliderDebounceTimer);
-  state.sliderDebounceTimer = setTimeout(() => {
+  if (immediate) {
     loadFloodedHexes();
-  }, 160);
+  } else {
+    state.sliderDebounceTimer = setTimeout(() => {
+      loadFloodedHexes();
+    }, 160);
+  }
 }
 
 function setupCurveScrubberInteractions() {
   const wrapper = document.getElementById('curve-chart-wrapper');
   if (!wrapper) return;
 
+  window.addEventListener('resize', () => {
+    renderFloodCurveSvg();
+  });
+
   let isDragging = false;
 
   const handlePointer = (clientX) => {
     const rect = wrapper.getBoundingClientRect();
-    const padLeft = 24 * (rect.width / 500);
-    const padRight = 36 * (rect.width / 500);
+    const padLeft = 24;
+    const padRight = 36;
     const usableWidth = rect.width - padLeft - padRight;
     const relX = Math.max(0, Math.min(usableWidth, clientX - rect.left - padLeft));
     const fraction = relX / usableWidth;
@@ -786,7 +798,7 @@ function setupCurveScrubberInteractions() {
       if (state.forecastPeakMm < 10.0) {
         if (forecastMsgEl) {
           forecastMsgEl.textContent =
-            'Forecast is below the scale; no waterlogging expected from rain alone';
+            `Forecast peak ${state.forecastPeakMm.toFixed(1)} mm/hr is below the lowest scenario on this scale (10 mm/hr).`;
           forecastMsgEl.style.display = 'block';
           setTimeout(() => {
             if (forecastMsgEl) forecastMsgEl.textContent = '';
@@ -893,6 +905,16 @@ function enhanceAgentMessageDom(containerEl, traces) {
     const theadThs = Array.from(tbl.querySelectorAll('thead th'));
     const rows = Array.from(tbl.querySelectorAll('tbody tr'));
 
+    // Check if this table corresponds to pump_plan tool traces
+    let pumpTraceData = null;
+    for (const t of traces) {
+      const d = t.data || {};
+      if (d.pumps && Array.isArray(d.pumps) && d.pumps.length > 0) {
+        pumpTraceData = d;
+        break;
+      }
+    }
+
     // Normalize and sentence-case headers
     const colMeta = theadThs.map((th, colIdx) => {
       const orig = th.innerText.trim();
@@ -914,6 +936,9 @@ function enhanceAgentMessageDom(containerEl, traces) {
       } else if (/(nearest underpass|nearest prior)/i.test(orig)) {
         norm = 'Nearest underpass';
         type = 'underpass';
+      } else if (/(share.*covered|covered.*share)/i.test(orig)) {
+        norm = 'Share covered';
+        type = 'share_covered';
       } else if (/(hex id|h3 index|h3 id|cell id)/i.test(orig)) {
         norm = 'Hex id';
         type = 'hex';
@@ -938,6 +963,19 @@ function enhanceAgentMessageDom(containerEl, traces) {
       let lon = null;
       let hexId = null;
 
+      // If this is a pump table row, align trigger_mm and why with tool data
+      if (pumpTraceData && pumpTraceData.pumps && pumpTraceData.pumps[rowIdx]) {
+        const pInfo = pumpTraceData.pumps[rowIdx];
+        const triggerCol = colMeta.find((c) => c.type === 'trigger');
+        const whyCol = colMeta.find((c) => c.type === 'why');
+        if (triggerCol && cells[triggerCol.colIdx] && pInfo.trigger_mm !== undefined) {
+          cells[triggerCol.colIdx].textContent = `${pInfo.trigger_mm.toFixed(1)}`;
+        }
+        if (whyCol && cells[whyCol.colIdx] && pInfo.why) {
+          cells[whyCol.colIdx].textContent = pInfo.why;
+        }
+      }
+
       const rowText = row.innerText;
       const coordMatch = rowText.match(/([2-3][0-9]\.[0-9]{2,6})[^\d]+(7[6-8]\.[0-9]{2,6})/);
       if (coordMatch) {
@@ -949,19 +987,19 @@ function enhanceAgentMessageDom(containerEl, traces) {
           if (d.pumps && d.pumps[rowIdx]) {
             lat = d.pumps[rowIdx].lat;
             lon = d.pumps[rowIdx].lon;
-            hexId = d.pumps[rowIdx].id;
+            hexId = d.pumps[rowIdx].id || d.pumps[rowIdx].hex_id;
             break;
           }
           if (d.top_risk_hexes && d.top_risk_hexes[rowIdx]) {
             lat = d.top_risk_hexes[rowIdx].lat;
             lon = d.top_risk_hexes[rowIdx].lon;
-            hexId = d.top_risk_hexes[rowIdx].id;
+            hexId = d.top_risk_hexes[rowIdx].id || d.top_risk_hexes[rowIdx].hex_id;
             break;
           }
           if (d.hotspots && d.hotspots[rowIdx]) {
             lat = d.hotspots[rowIdx].lat;
             lon = d.hotspots[rowIdx].lon;
-            hexId = d.hotspots[rowIdx].id;
+            hexId = d.hotspots[rowIdx].id || d.hotspots[rowIdx].hex_id;
             break;
           }
           if (d.lat && d.lon) {
@@ -1021,10 +1059,12 @@ function enhanceAgentMessageDom(containerEl, traces) {
       }
     });
 
-    // Remove raw hex and coordinates columns from the table to prevent horizontal overflow
+    // Remove raw hex, coordinates, and redundant share covered columns
     const colsToRemove = [];
     if (coordsColIdx !== -1) colsToRemove.push(coordsColIdx);
     if (hexColIdx !== -1) colsToRemove.push(hexColIdx);
+    const shareColIdx = colMeta.findIndex((c) => c.type === 'share_covered');
+    if (shareColIdx !== -1) colsToRemove.push(shareColIdx);
     colsToRemove.sort((a, b) => b - a);
     colsToRemove.forEach((idx) => {
       if (theadThs[idx]) theadThs[idx].remove();
@@ -1063,6 +1103,18 @@ function enhanceAgentMessageDom(containerEl, traces) {
         });
       });
     }
+
+    // Add "Share of flooded severity covered" as a single sentence under the table if not already present
+    if (pumpTraceData && pumpTraceData.covered_severity_share_pct !== undefined) {
+      const parentContainer = wrapper.parentElement || containerEl;
+      const textContent = parentContainer.textContent || '';
+      if (!textContent.toLowerCase().includes('share of flooded severity covered')) {
+        const summarySentence = document.createElement('p');
+        summarySentence.className = 'table-caption-summary';
+        summarySentence.textContent = `Share of flooded severity covered: ${pumpTraceData.covered_severity_share_pct}%. Heuristic selection with 1,500m radius.`;
+        wrapper.insertAdjacentElement('afterend', summarySentence);
+      }
+    }
   });
 
   // 2. Wrap standalone lengthy H3 hex ID lists in paragraphs
@@ -1085,6 +1137,15 @@ function enhanceAgentMessageDom(containerEl, traces) {
 
 async function handleSendMessage(promptText) {
   if (!promptText || !promptText.trim()) return;
+
+  // Scenario Sync: Immediately set rainfall scale and update map before answer renders
+  const rainMatch = promptText.match(/\b(\d+(?:\.\d+)?)\s*mm(?:[\/ ]?hr)?\b/i);
+  if (rainMatch) {
+    const parsedMm = parseFloat(rainMatch[1]);
+    if (!isNaN(parsedMm) && parsedMm >= 10 && parsedMm <= 100) {
+      updateScrubberToMm(parsedMm, true);
+    }
+  }
 
   const chatContainer = document.getElementById('chat-messages');
   const inputEl = document.getElementById('chat-input');
@@ -1160,6 +1221,18 @@ async function handleSendMessage(promptText) {
     // Update map overlays (pumps, routes, risk spots)
     if (data.tool_trace && data.tool_trace.length > 0) {
       updateAgentOverlays(data.tool_trace);
+      // Sync rainfall scale if tool trace explicitly used a scenario rate
+      for (const t of data.tool_trace) {
+        const d = t.data || {};
+        const toolMm =
+          d.rainfall_mm_hr ||
+          d.mm_per_hr ||
+          (t.args && (t.args.mm_per_hr || t.args.rainfall_mm_hr));
+        if (toolMm && typeof toolMm === 'number' && toolMm >= 10 && toolMm <= 100) {
+          updateScrubberToMm(toolMm, false);
+          break;
+        }
+      }
     }
 
     // Keep history

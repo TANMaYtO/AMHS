@@ -217,7 +217,7 @@ def _print_raster_stats(raster_path: Path, label: str) -> None:
 
 
 def fetch_osm_underpasses() -> Path:
-    """Query Overpass API for tunnels, culverts, and submerged layers in bbox."""
+    """Query Overpass API for tunnels, culverts, and underpasses (below street level) in bbox."""
     if UNDERPASSES_FILE.exists() and UNDERPASSES_FILE.stat().st_size > 0:
         print(f"OSM underpasses already exist at {UNDERPASSES_FILE}")
         _print_underpasses_summary(UNDERPASSES_FILE)

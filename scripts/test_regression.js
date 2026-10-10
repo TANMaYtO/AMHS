@@ -120,22 +120,31 @@ async function runRegressionSuite() {
   });
   await sleep(1000);
 
-  // Check 2: Log-scale Flood curve SVG rendering
-  console.log('2. Verifying log-scale /flood-curve rendering...');
+  // Check 2: Log-scale Flood curve SVG rendering & milestone label offset
+  console.log('2. Verifying log-scale /flood-curve rendering and label offset...');
   const curveRendered = await evaluate(`
     (() => {
       const svg = document.getElementById('flood-curve-svg');
       const paths = svg ? svg.querySelectorAll('path') : [];
-      const texts = svg ? Array.from(svg.querySelectorAll('text')).map(t => t.textContent) : [];
+      const textEls = svg ? Array.from(svg.querySelectorAll('text')) : [];
+      const texts = textEls.map(t => t.textContent);
       const cells = document.getElementById('curve-cells-count').textContent;
       const hasLogTitle = texts.some(t => t.includes('cells that may waterlog (log scale)'));
       const hasGridLabels = texts.includes('10k') && texts.includes('1k') && texts.includes('100') && texts.includes('10');
-      return { pathCount: paths.length, cellsText: cells, hasLogTitle, hasGridLabels, texts };
+      const milestone1243 = textEls.find(t => t.textContent === '1,243');
+      const handle = document.getElementById('curve-handle');
+      const labelAnchor = milestone1243 ? milestone1243.getAttribute('text-anchor') : null;
+      const labelX = milestone1243 ? parseFloat(milestone1243.getAttribute('x')) : null;
+      const handleX = handle ? parseFloat(handle.getAttribute('cx')) : null;
+      return { pathCount: paths.length, cellsText: cells, hasLogTitle, hasGridLabels, labelAnchor, labelX, handleX };
     })()
   `);
   console.log('   Log curve check:', curveRendered);
   if (!curveRendered.hasLogTitle) throw new Error('Curve missing log scale title');
   if (!curveRendered.hasGridLabels) throw new Error('Curve missing log scale gridline labels');
+  if (curveRendered.labelAnchor !== 'end' || !(curveRendered.labelX < curveRendered.handleX - 5)) {
+    throw new Error(`Milestone label not properly offset from handle: ${JSON.stringify(curveRendered)}`);
+  }
 
   // Check 3: Forecast button live check & scale guard
   console.log('3. Verifying live forecast button and scale guard...');
@@ -153,8 +162,11 @@ async function runRegressionSuite() {
   if (!forecastBtnInfo.btnText.includes('Forecast peak')) {
     throw new Error('Forecast button missing peak label');
   }
-  if (!forecastBtnInfo.statusMsg.includes('below the scale')) {
-    throw new Error('Forecast button failed to activate scale guard');
+  if (!forecastBtnInfo.statusMsg.includes('is below the lowest scenario on this scale (10 mm/hr).')) {
+    throw new Error(`Forecast button status message mismatch: ${forecastBtnInfo.statusMsg}`);
+  }
+  if (forecastBtnInfo.statusMsg.includes('no waterlogging expected')) {
+    throw new Error('Stale forecast message found');
   }
   if (forecastBtnInfo.initialMm !== forecastBtnInfo.afterMm) {
     throw new Error('Forecast button moved slider despite being below scale');
@@ -223,14 +235,65 @@ async function runRegressionSuite() {
     console.warn(`Timeout waiting for agent response ${expectedCount} after ${timeoutMs}ms`);
   }
 
-  // Check 6: Agent Pump Scenario Preset & Table Enhancement
-  console.log('6. Testing agent scenario: 6 pumps @ 60 mm/hr...');
-  await evaluate(`
-    (() => {
-      const btn = document.querySelector('.preset-btn[data-prompt*="6 pumps"]');
-      if (btn) btn.click();
+  // Check 6a: Verify Immediate Scenario Sync across ALL 4 Presets (before answer renders)
+  console.log('6a. Testing immediate scenario sync for all 4 presets before answer renders...');
+  const allPresetsSync = await evaluate(`
+    (async () => {
+      const origFetch = window.fetch;
+      const results = [];
+      window.fetch = async (url, opts) => {
+        if (typeof url === 'string' && url.includes('/agent/chat')) {
+          await new Promise(r => setTimeout(r, 150));
+          return new Response(JSON.stringify({ reply: 'Sync test ack.', tool_trace: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return origFetch(url, opts);
+      };
+
+      const btns = Array.from(document.querySelectorAll('.preset-btn'));
+      for (const btn of btns) {
+        btn.click();
+        // Check scale state immediately after click, BEFORE answer renders
+        const mmBeforeRender = document.getElementById('curve-mm-display').textContent;
+        const cellsBeforeRender = document.getElementById('curve-cells-count').textContent;
+        results.push({
+          prompt: btn.dataset.prompt,
+          mmBeforeRender,
+          cellsBeforeRender,
+        });
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      window.fetch = origFetch;
+      const chatFeed = document.getElementById('chat-messages');
+      while (chatFeed.children.length > 1) {
+        chatFeed.removeChild(chatFeed.lastChild);
+      }
+      return results;
     })()
   `);
+  console.log('   All 4 presets immediate sync:', JSON.stringify(allPresetsSync, null, 2));
+  const expectedMms = ['50 mm/hr', '40 mm/hr', '60 mm/hr', '40 mm/hr'];
+  allPresetsSync.forEach((res, idx) => {
+    if (res.mmBeforeRender !== expectedMms[idx]) {
+      throw new Error(`Preset ${idx + 1} failed immediate sync: got ${res.mmBeforeRender}, expected ${expectedMms[idx]}`);
+    }
+  });
+
+  // Check 6b: Agent Pump Scenario Preset (Preset 3: 60 mm/hr) & Table Verification
+  console.log('6b. Testing Preset 3 (6 pumps @ 60 mm/hr) live agent and pump table...');
+  const presetSync3 = await evaluate(`
+    (() => {
+      const btn = document.querySelector('.preset-btn[data-prompt*="6 pumps"]');
+      btn.click();
+      return { prompt: btn.dataset.prompt, mmDisplay: document.getElementById('curve-mm-display').textContent, cellsCount: document.getElementById('curve-cells-count').textContent };
+    })()
+  `);
+  console.log('   Preset 3 live click sync:', presetSync3);
+  if (presetSync3.mmDisplay !== '60 mm/hr') throw new Error(`Preset 3 failed immediate sync: ${presetSync3.mmDisplay}`);
+
   await waitForAgentResponse(2, 60000);
   const pumpTableCheck = await evaluate(`
     (() => {
@@ -240,30 +303,47 @@ async function runRegressionSuite() {
       if (!table) return { hasTable: false, text: last.innerText.slice(0, 300) };
 
       const ths = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
+      const triggerIdx = ths.findIndex(h => h.toLowerCase().includes('turns on'));
+      const whyIdx = ths.findIndex(h => h.toLowerCase().includes('why'));
+      const rows = Array.from(table.querySelectorAll('tbody tr')).map(tr => {
+        const tds = Array.from(tr.querySelectorAll('td'));
+        return {
+          location: tds[0] ? tds[0].childNodes[0]?.textContent?.trim() : '',
+          trigger: triggerIdx !== -1 && tds[triggerIdx] ? tds[triggerIdx].textContent.trim() : '',
+          why: whyIdx !== -1 && tds[whyIdx] ? tds[whyIdx].textContent.trim() : '',
+        };
+      });
       const hasDetails = table.querySelector('.row-details') !== null;
       const clickableRows = table.querySelectorAll('tr.clickable-row').length;
-      const firstRowLat = table.querySelector('tr.clickable-row')?.dataset?.lat;
-      const firstRowLon = table.querySelector('tr.clickable-row')?.dataset?.lon;
+      const msgText = last.innerText;
+      const hasShareSentence = msgText.toLowerCase().includes('share of flooded severity covered');
 
       return {
         hasTable: true,
         headers: ths,
+        rows,
         hasDetails,
         clickableRows,
-        firstRowLat,
-        firstRowLon,
+        hasShareSentence,
+        fullText: msgText,
       };
     })()
   `);
-  console.log('   Pump table check:', pumpTableCheck);
+  console.log('   Pump table check:', JSON.stringify(pumpTableCheck, null, 2));
   if (!pumpTableCheck.hasTable) {
     console.error('Agent message body:', pumpTableCheck.text);
     throw new Error('Agent reply missing interactive table');
   }
-  console.log('   Table headers:', pumpTableCheck.headers);
+  const allTriggers60 = pumpTableCheck.rows.every(r => r.trigger === '60' || r.trigger === '60.0');
+  if (allTriggers60) {
+    throw new Error('Pump table Turns on at (mm/hr) still shows 60.0 for all rows!');
+  }
+  if (!pumpTableCheck.hasShareSentence) {
+    throw new Error('Pump response missing Share of flooded severity covered sentence!');
+  }
 
   // Test row click to flyTo
-  console.log('6b. Testing table row click flyTo map center...');
+  console.log('6c. Testing table row click flyTo map center...');
   const centerBefore = await evaluate(`[window.map.getCenter().lng, window.map.getCenter().lat]`);
   await evaluate(`
     (() => {
@@ -277,14 +357,18 @@ async function runRegressionSuite() {
 
   await takeScreenshot('after_pumps.png');
 
-  // Check 7: Agent Route Scenario Preset
-  console.log('7. Testing agent scenario: Route CP to Cyber City...');
-  await evaluate(`
+  // Check 7: Agent Route Scenario Preset (Preset 4: 40 mm/hr)
+  console.log('7. Testing Preset 4: Route CP to Cyber City (40 mm/hr)...');
+  const presetSync4 = await evaluate(`
     (() => {
       const btn = document.querySelector('.preset-btn[data-prompt*="Cyber City"]');
-      if (btn) btn.click();
+      btn.click();
+      return { prompt: btn.dataset.prompt, mmDisplay: document.getElementById('curve-mm-display').textContent, cellsCount: document.getElementById('curve-cells-count').textContent };
     })()
   `);
+  console.log('   Preset 4 immediate sync:', presetSync4);
+  if (presetSync4.mmDisplay !== '40 mm/hr') throw new Error(`Preset 4 failed immediate sync: ${presetSync4.mmDisplay}`);
+
   await waitForAgentResponse(3, 45000);
   const routeCheck = await evaluate(`
     (() => {

@@ -56,6 +56,10 @@ CRITICAL OPERATING PRINCIPLES:
     - Always use sentence-case column headers: "Location", "Turns on at (mm/hr)", "Why", "Cell ID", "Coordinates".
     - Place name or landmark first, then "Turns on at (mm/hr)", then "Why".
     - Always include cell ID and coordinates (lat, lon) in each row so operators can inspect site details.
+12. PUMP DEPLOYMENT TABLES:
+    - In pump tables, "Turns on at (mm/hr)" MUST be each site's own trigger_mm from the tool output (NOT the scenario rainfall rate).
+    - "Why" MUST use the hex's own plain-language reason from the tool output (e.g. underpass prior, low drainage clearance, high topographic wetness).
+    - State "Share of flooded severity covered: X%" as a single sentence immediately below the table, NOT per row.
 """
 
 
