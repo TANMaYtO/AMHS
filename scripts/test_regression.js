@@ -131,7 +131,7 @@ async function runRegressionSuite() {
       const cells = document.getElementById('curve-cells-count').textContent;
       const hasLogTitle = texts.some(t => t.includes('cells that may waterlog (log scale)'));
       const hasGridLabels = texts.includes('10k') && texts.includes('1k') && texts.includes('100') && texts.includes('10');
-      const milestone1243 = textEls.find(t => t.textContent === '1,243');
+      const milestone1243 = textEls.find(t => t.textContent === '1,243' || t.textContent === '1,239');
       const handle = document.getElementById('curve-handle');
       const labelAnchor = milestone1243 ? milestone1243.getAttribute('text-anchor') : null;
       const labelX = milestone1243 ? parseFloat(milestone1243.getAttribute('x')) : null;

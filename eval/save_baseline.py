@@ -5,8 +5,8 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to sys.path
-sys.path.insert(0, r"d:\AMHS\floodlens")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
 
 import numpy as np
 import pandas as pd
@@ -79,7 +79,7 @@ baseline_data = {
     "recall_metrics": recall_results,
 }
 
-output_path = Path(r"d:\AMHS\floodlens\eval\baseline_top200_and_recall.json")
+output_path = Path(__file__).resolve().parent / "baseline_top200_and_recall.json"
 with open(output_path, "w", encoding="utf-8") as f:
     json.dump(baseline_data, f, indent=2)
 

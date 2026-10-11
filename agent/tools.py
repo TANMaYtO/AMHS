@@ -338,6 +338,10 @@ def get_hotspots(
         "rainfall_mm": float(mm_per_hr),
         "city": city,
     }
+    summary = (
+        f"Found {total_flooded} flooded hexes at {mm_per_hr:.1f} mm/hr "
+        f"({city}), returning top {len(hotspots_list)}"
+    )
     record_tool_trace(
         "get_hotspots",
         {"mm_per_hr": mm_per_hr, "top_n": top_n, "city": city},

@@ -3,8 +3,9 @@
 import json
 import sys
 
-# Add project root to sys.path
-sys.path.insert(0, r"d:\AMHS\floodlens")
+from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
 
 import numpy as np
 import pandas as pd
